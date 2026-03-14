@@ -4,17 +4,22 @@ import { createServerClient } from '@/lib/supabase-server';
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const q = req.nextUrl.searchParams.get('q');
+  const page = Math.max(1, parseInt(req.nextUrl.searchParams.get('page') || '1', 10));
+  const limit = Math.min(200, Math.max(1, parseInt(req.nextUrl.searchParams.get('limit') || '50', 10)));
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
   let query = supabase
     .from('customers')
-    .select('*')
-    .order('name');
+    .select('*', { count: 'exact' })
+    .order('name')
+    .range(from, to);
 
   if (q) {
     query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`);
   }
 
-  const { data: customers, error } = await query;
+  const { data: customers, error, count } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -71,14 +76,14 @@ export async function GET(req: NextRequest) {
     total_spend: Math.round((spendMap[c.id] || 0) * 100) / 100,
   }));
 
-  return NextResponse.json(enriched);
+  return NextResponse.json({ data: enriched, total: count ?? 0, page, limit });
 }
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
-  const { name, phone, email } = body;
+  const { name, phone, email, address, city, state, zip } = body;
 
   if (!name) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 });
@@ -86,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('customers')
-    .insert({ name, phone: phone || null, email: email || null })
+    .insert({ name, phone: phone || null, email: email || null, address: address || null, city: city || null, state: state || null, zip: zip || null })
     .select()
     .single();
 

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Icon, icons } from '@/components/ui/Icon';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { Modal } from '@/components/ui/Modal';
 import { Btn } from '@/components/ui/Btn';
+import { NewWOModal } from '@/components/NewWOModal';
+import { SetupWizard } from '@/components/SetupWizard';
 import { TH, TD } from '@/components/ui/Table';
 import { fmt } from '@/lib/utils';
 import { formatTime } from '@/lib/utils';
@@ -14,17 +15,20 @@ import {
   WorkOrder,
   Tech,
   Appointment,
-  Customer,
-  Vehicle,
+  Invoice,
+  ServiceReminder,
   STATUS_COLORS,
   PRIORITY_COLORS,
-  WO_STATUSES,
   type WOStatus,
-  type Priority,
+  type ShopSettings,
+  type TimeEntry,
+  type CannedJob,
 } from '@/lib/types';
 
 const KANBAN_STATUSES: WOStatus[] = ['Check-In', 'In Progress', 'Waiting on Parts', 'Ready for Pickup'];
+const PIPELINE_STATUSES: WOStatus[] = ['Scheduled', 'Check-In', 'In Progress', 'Waiting on Parts', 'Ready for Pickup'];
 const STATUS_BAR_COLORS: Record<string, string> = {
+  'Scheduled': '#8b5cf6',
   'Check-In': '#3b82f6',
   'In Progress': '#f97316',
   'Waiting on Parts': '#fbbf24',
@@ -36,22 +40,37 @@ export default function DashboardPage() {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [techs, setTechs] = useState<Tech[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
 
-  // Quick Add form state
-  const [qaCustomerSearch, setQaCustomerSearch] = useState('');
-  const [qaCustomerResults, setQaCustomerResults] = useState<Customer[]>([]);
-  const [qaSelectedCustomer, setQaSelectedCustomer] = useState<Customer | null>(null);
-  const [qaCustomerVehicles, setQaCustomerVehicles] = useState<Vehicle[]>([]);
-  const [qaVehicleId, setQaVehicleId] = useState('');
-  const [qaPriority, setQaPriority] = useState<Priority>('low');
-  const [qaJob, setQaJob] = useState('');
-  const [qaTechId, setQaTechId] = useState('');
-  const [qaHours, setQaHours] = useState('');
-  const [qaNotes, setQaNotes] = useState('');
-  const [qaShowDropdown, setQaShowDropdown] = useState(false);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [cannedJobs, setCannedJobs] = useState<CannedJob[]>([]);
+  const [showChecklist, setShowChecklist] = useState(true);
+  const [activeShifts, setActiveShifts] = useState<TimeEntry[]>([]);
+  const [reminders, setReminders] = useState<ServiceReminder[]>([]);
+  const [activities, setActivities] = useState<Array<{
+    id: string;
+    work_order_id: string;
+    action: string;
+    details: string | null;
+    created_at: string;
+    work_order?: { id: string; display_id: string } | null;
+  }>>([]);
+  const [reportData, setReportData] = useState<{ revenue_this_month?: number; low_stock_count?: number } | null>(null);
+  const [expandedWidget, setExpandedWidget] = useState<string | null>(null);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedWidget((prev) => (prev === id ? null : id));
+  }, []);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpandedWidget(null);
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -59,12 +78,30 @@ export default function DashboardPage() {
       fetch('/api/work-orders').then((r) => r.json()),
       fetch('/api/techs').then((r) => r.json()),
       fetch(`/api/appointments?start=${today}&end=${today}`).then((r) => r.json()),
-    ]).then(([wo, t, a]) => {
+      fetch('/api/settings').then((r) => r.json()),
+      fetch('/api/reports').then((r) => r.json()),
+      fetch('/api/invoices').then((r) => r.json()),
+      fetch('/api/time-clock?type=shift&active=true').then((r) => r.json()),
+      fetch('/api/canned-jobs').then((r) => r.json()),
+      fetch('/api/service-reminders?status=Pending').then((r) => r.json()),
+      fetch('/api/activity').then((r) => r.json()),
+    ]).then(([woJson, t, a, s, rpt, invJson, shifts, cj, rem, act]) => {
+      const wo = Array.isArray(woJson) ? woJson : woJson.data ?? [];
       setWorkOrders(wo);
-      setTechs(t);
-      setAppointments(a);
+      if (Array.isArray(t)) setTechs(t);
+      if (Array.isArray(a)) setAppointments(a);
+      const inv = Array.isArray(invJson) ? invJson : invJson.data ?? [];
+      setInvoices(inv);
+      if (Array.isArray(shifts)) setActiveShifts(shifts);
+      if (Array.isArray(cj)) setCannedJobs(cj);
+      if (Array.isArray(rem)) setReminders(rem);
+      if (Array.isArray(act)) setActivities(act);
+      setShopSettings(s);
+      setReportData(rpt);
       setLoaded(true);
-    });
+      // Best-effort: trigger auto-send for due service reminders
+      fetch('/api/service-reminders/send-due', { method: 'POST' }).catch(() => {});
+    }).catch(() => setLoaded(true));
   }, []);
 
   const openWOs = useMemo(() => workOrders.filter((w) => w.status !== 'Completed'), [workOrders]);
@@ -81,11 +118,14 @@ export default function DashboardPage() {
     year: 'numeric',
   });
 
+  const monthRevenue = reportData?.revenue_this_month ?? 0;
+  const lowStock = reportData?.low_stock_count ?? 0;
+
   const stats = [
-    { label: 'Open Work Orders', value: String(openWOs.length), sub: highP + ' high priority', color: '#f97316', icon: icons.wrench },
-    { label: "Today's Revenue", value: '$3,850', sub: '+18% vs last Mon', color: '#22c55e', icon: icons.dollar },
-    { label: 'Vehicles In Shop', value: String(inShop), sub: 'All bays active', color: '#3b82f6', icon: icons.truck },
-    { label: 'Parts Low Stock', value: '4', sub: 'Reorder needed', color: '#ef4444', icon: icons.alert },
+    { label: 'Open Work Orders', value: String(openWOs.length), sub: highP + ' high priority', color: '#f97316', icon: icons.wrench, href: '/work-orders' },
+    { label: 'Monthly Revenue', value: fmt(monthRevenue), sub: 'This month', color: '#22c55e', icon: icons.dollar, href: '/reports' },
+    { label: 'Vehicles In Shop', value: String(inShop), sub: inShop === 1 ? '1 bay active' : inShop + ' bays active', color: '#3b82f6', icon: icons.truck, href: '/work-orders?status=In+Progress' },
+    { label: 'Parts Low Stock', value: String(lowStock), sub: lowStock > 0 ? 'Reorder needed' : 'Stock OK', color: '#ef4444', icon: icons.alert, href: '/inventory?filter=low-stock' },
   ];
 
   const todayAppts = useMemo(
@@ -96,70 +136,53 @@ export default function DashboardPage() {
     [appointments]
   );
 
-  // Customer search for Quick Add
-  const handleCustomerSearch = (q: string) => {
-    setQaCustomerSearch(q);
-    setQaSelectedCustomer(null);
-    setQaCustomerVehicles([]);
-    setQaVehicleId('');
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!q.trim()) {
-      setQaCustomerResults([]);
-      setQaShowDropdown(false);
-      return;
-    }
-    searchTimer.current = setTimeout(async () => {
-      const res = await fetch(`/api/customers?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setQaCustomerResults(data);
-      setQaShowDropdown(true);
-    }, 250);
-  };
-
-  const selectCustomer = async (c: Customer) => {
-    setQaSelectedCustomer(c);
-    setQaCustomerSearch(c.name);
-    setQaShowDropdown(false);
-    // Fetch this customer's vehicles
-    const res = await fetch(`/api/customers/${c.id}`);
-    const detail = await res.json();
-    setQaCustomerVehicles(detail.vehicles || []);
-    if (detail.vehicles?.length === 1) {
-      setQaVehicleId(detail.vehicles[0].id);
-    }
-  };
-
-  const handleCreateWO = async () => {
-    if (!qaSelectedCustomer || !qaVehicleId || !qaJob.trim()) return;
-    await fetch('/api/work-orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer_id: qaSelectedCustomer.id,
-        vehicle_id: qaVehicleId,
-        priority: qaPriority,
-        job: qaJob,
-        tech_id: qaTechId || null,
-        notes: qaNotes,
+  const overdueInvoices = useMemo(
+    () =>
+      invoices.filter((inv) => {
+        if (inv.status === 'Overdue') return true;
+        if (inv.status === 'Sent') {
+          // Consider "Sent" invoices older than 30 days as past due
+          const created = new Date(inv.created_at);
+          const now = new Date();
+          const daysSince = Math.floor((now.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+          return daysSince > 30;
+        }
+        return false;
       }),
-    });
-    setShowQuickAdd(false);
-    // Reset form
-    setQaCustomerSearch('');
-    setQaSelectedCustomer(null);
-    setQaCustomerVehicles([]);
-    setQaVehicleId('');
-    setQaPriority('low');
-    setQaJob('');
-    setQaTechId('');
-    setQaHours('');
-    setQaNotes('');
-    // Refresh work orders
-    const wo = await fetch('/api/work-orders').then((r) => r.json());
-    setWorkOrders(wo);
+    [invoices]
+  );
+
+  const pipelineCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of PIPELINE_STATUSES) {
+      counts[s] = workOrders.filter((w) => w.status === s).length;
+    }
+    return counts;
+  }, [workOrders]);
+
+  const pipelineTotal = useMemo(
+    () => PIPELINE_STATUSES.reduce((sum, s) => sum + (pipelineCounts[s] || 0), 0),
+    [pipelineCounts]
+  );
+
+  const refreshWorkOrders = async () => {
+    const json = await fetch('/api/work-orders').then((r) => r.json());
+    setWorkOrders(Array.isArray(json) ? json : json.data ?? []);
   };
 
   if (!loaded) return null;
+
+  // Show setup wizard for new shops
+  const needsSetup = !shopSettings?.setup_completed_at && techs.length === 0 && cannedJobs.length === 0;
+  if (needsSetup) {
+    return <SetupWizard initialSettings={{
+      shop_name: shopSettings?.shop_name,
+      phone: shopSettings?.phone,
+      address: shopSettings?.address,
+      default_labor_rate: shopSettings?.default_labor_rate,
+      tax_rate: shopSettings?.tax_rate,
+    }} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -173,63 +196,89 @@ export default function DashboardPage() {
         </Btn>
       </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {stats.map((s, i) => (
-          <div key={i} className="bg-card border border-bdr rounded-xl p-5 hover:border-slate-600 transition group">
+      {/* Setup Checklist */}
+      {showChecklist && shopSettings?.setup_completed_at && (() => {
+        const checks = [
+          { label: 'Shop name & phone', done: !!(shopSettings.shop_name && shopSettings.phone), href: '/settings' },
+          { label: 'Labor rate configured', done: shopSettings.default_labor_rate > 0, href: '/settings' },
+          { label: 'At least 1 technician', done: techs.length > 0, href: '/settings?tab=team' },
+          { label: 'At least 1 service template', done: cannedJobs.length > 0, href: '/settings?tab=team' },
+          { label: 'SMS or payments connected', done: !!(shopSettings.twilio_account_sid || shopSettings.stripe_secret_key), href: '/settings?tab=integrations' },
+        ];
+        const doneCount = checks.filter(c => c.done).length;
+        if (doneCount >= checks.length) return null;
+        return (
+          <div className="bg-card border border-accent/20 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-[0.12em]">
-                {s.label}
-              </span>
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: s.color + '18' }}
-              >
-                <Icon d={s.icon} size={18} stroke={s.color} />
+              <div>
+                <h3 className="font-heading font-bold text-white text-sm">Shop Setup</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{doneCount} of {checks.length} steps complete</p>
               </div>
+              <button onClick={() => setShowChecklist(false)} className="text-slate-600 hover:text-slate-400 transition">
+                <Icon d={icons.x} size={16} />
+              </button>
             </div>
-            <div className="text-3xl font-heading font-bold text-white">{s.value}</div>
-            <div className="text-xs text-slate-500 mt-1">{s.sub}</div>
+            <div className="flex h-1.5 rounded-full overflow-hidden bg-bg mb-4">
+              <div className="bg-accent rounded-full transition-all" style={{ width: `${(doneCount / checks.length) * 100}%` }} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {checks.map((c, i) => (
+                <Link key={i} href={c.href} className={`flex items-center gap-2 text-sm px-3 py-2 rounded-lg transition ${c.done ? 'text-slate-500' : 'text-slate-300 bg-bg/50 hover:bg-surface/50'}`}>
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${c.done ? 'bg-accent/20' : 'border border-bdr'}`}>
+                    {c.done && <Icon d={icons.check} size={10} stroke="#f97316" />}
+                  </div>
+                  <span className={c.done ? 'line-through' : ''}>{c.label}</span>
+                </Link>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
-      {/* Status Pipeline */}
-      <div className="bg-card border border-bdr rounded-xl p-4">
-        <div className="flex items-center gap-6 mb-3">
-          <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider">
-            Job Pipeline
-          </span>
-          <div className="flex items-center gap-4 ml-auto">
-            {KANBAN_STATUSES.map((s) => {
-              const cnt = workOrders.filter((w) => w.status === s).length;
-              return (
-                <div key={s} className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full" style={{ background: STATUS_BAR_COLORS[s] }} />
-                  <span className="text-xs text-slate-400">{s}</span>
-                  <span className="text-xs font-bold ml-0.5" style={{ color: STATUS_BAR_COLORS[s] }}>
-                    {cnt}
-                  </span>
+      {/* Stat Cards */}
+      <div className={expandedWidget === 'stats' ? 'fixed inset-0 z-50 bg-bg p-6 overflow-auto' : ''}>
+        {expandedWidget === 'stats' && (
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-heading font-bold text-white tracking-wide text-lg">Stats Overview</h3>
+            <button onClick={() => setExpandedWidget(null)} className="text-slate-400 hover:text-white transition p-1">
+              <Icon d={icons.x} size={20} />
+            </button>
+          </div>
+        )}
+        <div className={expandedWidget === 'stats' ? 'grid grid-cols-2 sm:grid-cols-4 gap-6' : 'grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4'}>
+          {stats.map((s, i) => (
+            <Link key={i} href={s.href} className={`bg-card border border-bdr rounded-xl ${expandedWidget === 'stats' ? 'p-8' : 'p-5'} hover:border-slate-600 transition group cursor-pointer block`}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-[0.12em]">
+                  {s.label}
+                </span>
+                <div
+                  className="w-9 h-9 rounded-lg flex items-center justify-center"
+                  style={{ background: s.color + '18' }}
+                >
+                  <Icon d={s.icon} size={18} stroke={s.color} />
                 </div>
-              );
-            })}
+              </div>
+              <div className={`${expandedWidget === 'stats' ? 'text-5xl' : 'text-3xl'} font-heading font-bold text-white`}>{s.value}</div>
+              <div className="text-xs text-slate-500 mt-1">{s.sub}</div>
+            </Link>
+          ))}
+        </div>
+        {expandedWidget !== 'stats' && (
+          <div className="flex justify-end -mt-2">
+            <button onClick={() => toggleExpand('stats')} className="text-slate-600 hover:text-slate-400 transition p-1" title="Expand">
+              <Icon d={icons.expand} size={14} />
+            </button>
           </div>
-        </div>
-        <div className="flex h-2 rounded-full overflow-hidden bg-bg">
-          {KANBAN_STATUSES.map((s) => {
-            const cnt = workOrders.filter((w) => w.status === s).length;
-            const pct = workOrders.length > 0 ? (cnt / workOrders.length) * 100 : 0;
-            return (
-              <div key={s} style={{ width: pct + '%', background: STATUS_BAR_COLORS[s] }} className="transition-all" />
-            );
-          })}
-        </div>
+        )}
       </div>
 
-      {/* Tech Dispatch Board */}
-      <div className="bg-card border border-bdr rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
-          <h3 className="font-heading font-bold text-white tracking-wide">Tech Dispatch Board</h3>
+      {/* Work Order Pipeline Mini-Summary */}
+      <div className="bg-card border border-bdr rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider">
+            Work Order Pipeline
+          </span>
           <Link
             href="/work-orders"
             className="text-xs text-accent hover:text-orange-400 font-heading font-semibold tracking-wider uppercase"
@@ -237,23 +286,265 @@ export default function DashboardPage() {
             Kanban &rarr;
           </Link>
         </div>
+        {/* Status count chips */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+          {PIPELINE_STATUSES.map((s) => {
+            const cnt = pipelineCounts[s] || 0;
+            const c = STATUS_BAR_COLORS[s];
+            return (
+              <div
+                key={s}
+                className="flex items-center gap-2 bg-bg border border-bdr rounded-lg px-3 py-2 cursor-pointer hover:border-slate-500 transition"
+                onClick={() => router.push('/work-orders')}
+              >
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c }} />
+                <span className="text-xs text-slate-400 truncate flex-1">{s === 'Waiting on Parts' ? 'Parts' : s}</span>
+                <span className="text-sm font-heading font-bold" style={{ color: c }}>{cnt}</span>
+              </div>
+            );
+          })}
+        </div>
+        {/* Pipeline bar */}
+        <div className="flex h-2 rounded-full overflow-hidden bg-bg">
+          {PIPELINE_STATUSES.map((s) => {
+            const cnt = pipelineCounts[s] || 0;
+            const pct = pipelineTotal > 0 ? (cnt / pipelineTotal) * 100 : 0;
+            return (
+              <div key={s} style={{ width: pct + '%', background: STATUS_BAR_COLORS[s] }} className="transition-all" />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Today's Appointments + Overdue Invoices — side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+        {/* Today's Appointments */}
+        <Link href="/scheduling" className="block">
+          <div className="bg-card border border-bdr rounded-xl overflow-hidden hover:border-slate-600 transition h-full">
+            <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#3b82f618' }}>
+                  <Icon d={icons.calendar} size={16} stroke="#3b82f6" />
+                </div>
+                <h3 className="font-heading font-bold text-white tracking-wide text-sm">Today&apos;s Appointments</h3>
+              </div>
+              <span className="text-xs font-heading font-bold text-slate-500">
+                {todayAppts.length} {todayAppts.length === 1 ? 'appt' : 'appts'}
+              </span>
+            </div>
+            <div className="divide-y divide-bdr max-h-[320px] overflow-y-auto">
+              {todayAppts.length === 0 && (
+                <div className="px-5 py-8 text-center">
+                  <Icon d={icons.calendar} size={28} stroke="#334155" className="mx-auto mb-2" />
+                  <p className="text-sm text-slate-500">No appointments today</p>
+                </div>
+              )}
+              {todayAppts.map((a) => {
+                const tech = techs.find((t) => t.id === a.tech_id);
+                const startDate = new Date(a.start_time);
+                const startStr = formatTime(startDate);
+                const durationHrs = a.duration_minutes / 60;
+                const vehicleStr = a.vehicle
+                  ? `${a.vehicle.year || ''} ${a.vehicle.make} ${a.vehicle.model}`.trim()
+                  : '';
+                return (
+                  <div key={a.id} className="px-4 py-3 hover:bg-surface/30 transition flex items-center gap-3">
+                    <div className="w-1 h-9 rounded-full shrink-0" style={{ background: tech?.color || '#64748b' }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-slate-200 font-medium truncate">{a.customer?.name}</div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {vehicleStr}{vehicleStr && a.job ? ' \u00b7 ' : ''}{a.job}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs text-slate-300 font-medium">{startStr}</div>
+                      <div className="text-[11px] text-slate-500">{durationHrs}h</div>
+                    </div>
+                    {tech && (
+                      <div
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                        style={{ background: tech.color + '20', color: tech.color }}
+                      >
+                        {tech.name.split(' ').map((n) => n[0]).join('')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Link>
+
+        {/* Overdue Invoices */}
+        <Link href="/invoicing" className="block">
+          <div className="bg-card border border-bdr rounded-xl overflow-hidden hover:border-slate-600 transition h-full">
+            <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#ef444418' }}>
+                  <Icon d={icons.alert} size={16} stroke="#ef4444" />
+                </div>
+                <h3 className="font-heading font-bold text-white tracking-wide text-sm">Overdue Invoices</h3>
+              </div>
+              {overdueInvoices.length > 0 && (
+                <span className="text-xs font-heading font-bold px-2 py-0.5 rounded-full" style={{ background: '#ef444418', color: '#ef4444' }}>
+                  {overdueInvoices.length} overdue
+                </span>
+              )}
+            </div>
+            <div className="divide-y divide-bdr max-h-[320px] overflow-y-auto">
+              {overdueInvoices.length === 0 && (
+                <div className="px-5 py-8 text-center">
+                  <Icon d={icons.check} size={28} stroke="#22c55e" className="mx-auto mb-2" />
+                  <p className="text-sm text-slate-500">No overdue invoices</p>
+                </div>
+              )}
+              {overdueInvoices.map((inv) => {
+                const created = new Date(inv.created_at);
+                const daysSince = Math.floor((new Date().getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+                const vehicleStr = inv.vehicle
+                  ? `${inv.vehicle.year || ''} ${inv.vehicle.make} ${inv.vehicle.model}`.trim()
+                  : '';
+                return (
+                  <div key={inv.id} className="px-4 py-3 hover:bg-surface/30 transition flex items-center gap-3">
+                    <div className="w-1 h-9 rounded-full shrink-0" style={{ background: STATUS_COLORS[inv.status] || '#ef4444' }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-accent text-xs font-bold">{inv.display_id}</span>
+                        <span className="text-sm text-slate-200 font-medium truncate">{inv.customer?.name}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {vehicleStr}{vehicleStr ? ' \u00b7 ' : ''}{daysSince}d ago
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm text-white font-semibold">{fmt(inv.total)}</div>
+                      <StatusBadge status={inv.status} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {overdueInvoices.length > 0 && (
+              <div className="px-5 py-2 border-t border-bdr bg-surface/20">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Total outstanding</span>
+                  <span className="text-sm font-heading font-bold text-red-400">
+                    {fmt(overdueInvoices.reduce((sum, inv) => sum + Number(inv.total), 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </Link>
+      </div>
+
+      {/* Service Reminders Due */}
+      {(() => {
+        const now = new Date();
+        const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const todayStr2 = now.toISOString().slice(0, 10);
+        const weekStr = weekFromNow.toISOString().slice(0, 10);
+
+        const dueReminders = reminders.filter(r => {
+          if (!r.due_date) return false;
+          return r.due_date <= weekStr;
+        });
+        const overdue = dueReminders.filter(r => r.due_date! < todayStr2);
+        const dueSoon = dueReminders.filter(r => r.due_date! >= todayStr2);
+
+        if (dueReminders.length === 0) return null;
+
+        return (
+          <div className="bg-card border border-bdr rounded-xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
+              <h3 className="font-heading font-bold text-white tracking-wide flex items-center gap-2">
+                <Icon d={icons.bell} size={16} stroke="#f59e0b" />
+                Service Reminders
+              </h3>
+              <span className="text-xs text-slate-500">{dueReminders.length} due</span>
+            </div>
+            <div className="divide-y divide-bdr max-h-[300px] overflow-y-auto">
+              {overdue.length > 0 && (
+                <div className="px-4 py-1.5 bg-red-500/5">
+                  <span className="text-[10px] font-heading font-bold text-red-400 uppercase tracking-wider">Overdue</span>
+                </div>
+              )}
+              {overdue.map(r => (
+                <Link key={r.id} href={`/customers?open=${r.customer_id}`} className="px-4 py-3 flex items-center gap-3 hover:bg-surface/50 transition block">
+                  <div className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-200 font-medium truncate">{r.customer?.name || 'Customer'}</div>
+                    <div className="text-xs text-slate-500 truncate">{r.service_type}</div>
+                  </div>
+                  <div className="text-xs text-red-400 shrink-0">
+                    {r.due_date ? new Date(r.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                  </div>
+                </Link>
+              ))}
+              {dueSoon.length > 0 && (
+                <div className="px-4 py-1.5 bg-amber-500/5">
+                  <span className="text-[10px] font-heading font-bold text-amber-400 uppercase tracking-wider">Due This Week</span>
+                </div>
+              )}
+              {dueSoon.map(r => (
+                <Link key={r.id} href={`/customers?open=${r.customer_id}`} className="px-4 py-3 flex items-center gap-3 hover:bg-surface/50 transition block">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-slate-200 font-medium truncate">{r.customer?.name || 'Customer'}</div>
+                    <div className="text-xs text-slate-500 truncate">{r.service_type}</div>
+                  </div>
+                  <div className="text-xs text-amber-400 shrink-0">
+                    {r.due_date ? new Date(r.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Tech Dispatch Board */}
+      <div className={expandedWidget === 'techs' ? 'fixed inset-0 z-50 bg-bg overflow-auto flex flex-col' : 'bg-card border border-bdr rounded-xl overflow-hidden'}>
+        <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
+          <h3 className="font-heading font-bold text-white tracking-wide">Tech Dispatch Board</h3>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/work-orders"
+              className="text-xs text-accent hover:text-orange-400 font-heading font-semibold tracking-wider uppercase"
+            >
+              Kanban &rarr;
+            </Link>
+            <button onClick={() => toggleExpand('techs')} className="text-slate-600 hover:text-slate-400 transition p-1" title={expandedWidget === 'techs' ? 'Collapse' : 'Expand'}>
+              <Icon d={expandedWidget === 'techs' ? icons.x : icons.expand} size={14} />
+            </button>
+          </div>
+        </div>
         <div className="divide-y divide-bdr">
           {techs.map((tech) => {
             const techWOs = workOrders.filter((w) => w.tech_id === tech.id);
             const activeHrs = techWOs
               .filter((w) => w.status !== 'Ready for Pickup' && w.status !== 'Completed')
               .reduce((s, w) => s + (w.labor_hours || 0), 0);
+            const isClockedIn = activeShifts.some((s) => s.tech_id === tech.id);
             return (
               <div key={tech.id} className="p-4">
                 <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                    style={{ background: tech.color + '20', color: tech.color }}
-                  >
-                    {tech.name
-                      .split(' ')
-                      .map((n) => n[0])
-                      .join('')}
+                  <div className="relative shrink-0">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                      style={{ background: tech.color + '20', color: tech.color }}
+                    >
+                      {tech.name
+                        .split(' ')
+                        .map((n) => n[0])
+                        .join('')}
+                    </div>
+                    <div
+                      className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card ${
+                        isClockedIn ? 'bg-green-400' : 'bg-slate-600'
+                      }`}
+                    />
                   </div>
                   <span className="text-sm font-medium text-white">{tech.name}</span>
                   <span className="text-xs text-slate-500">
@@ -305,12 +596,63 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        {/* All Work Orders */}
-        <div className="col-span-2 bg-card border border-bdr rounded-xl overflow-hidden">
+      {expandedWidget === 'orders' ? (
+        /* All Work Orders — Expanded */
+        <div className="fixed inset-0 z-50 bg-bg overflow-auto flex flex-col">
+          <div className="px-6 py-4 border-b border-bdr flex items-center justify-between shrink-0">
+            <h3 className="font-heading font-bold text-white tracking-wide text-lg">All Work Orders</h3>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500">{workOrders.length} total</span>
+              <button onClick={() => setExpandedWidget(null)} className="text-slate-400 hover:text-white transition p-1">
+                <Icon d={icons.x} size={20} />
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <table className="w-full">
+              <thead className="bg-surface/80 sticky top-0 z-10">
+                <tr>
+                  <TH>WO#</TH>
+                  <TH>Customer</TH>
+                  <TH>Vehicle</TH>
+                  <TH>Job</TH>
+                  <TH>Tech</TH>
+                  <TH>Status</TH>
+                  <TH className="text-right">Total</TH>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-bdr">
+                {workOrders.map((w) => {
+                  const vehicleStr = w.vehicle
+                    ? `${w.vehicle.year || ''} ${w.vehicle.make} ${w.vehicle.model}`
+                    : '';
+                  return (
+                    <tr key={w.id} className="hover:bg-surface/30 transition cursor-pointer" onClick={() => router.push(`/work-orders?wo=${w.display_id}`)}>
+                      <TD><span className="text-accent font-semibold text-xs">{w.display_id}</span></TD>
+                      <TD><span className="text-slate-200 text-xs">{w.customer?.name}</span></TD>
+                      <TD><span className="text-slate-400 text-[11px]">{vehicleStr}</span></TD>
+                      <TD><span className="text-slate-300 text-xs">{w.job}</span></TD>
+                      <TD><span className="text-xs" style={{ color: w.tech?.color }}>{w.tech?.name?.split(' ')[0]}</span></TD>
+                      <TD><StatusBadge status={w.status} /></TD>
+                      <TD className="text-right"><span className="text-slate-200 text-xs font-medium">{fmt(w.estimated_total || 0)}</span></TD>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        /* All Work Orders — Inline */
+        <div className="bg-card border border-bdr rounded-xl overflow-hidden">
           <div className="px-5 py-3 border-b border-bdr flex items-center justify-between">
             <h3 className="font-heading font-bold text-white tracking-wide">All Work Orders</h3>
-            <span className="text-xs text-slate-500">{workOrders.length} total</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500">{workOrders.length} total</span>
+              <button onClick={() => toggleExpand('orders')} className="text-slate-600 hover:text-slate-400 transition p-1" title="Expand">
+                <Icon d={icons.expand} size={14} />
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
             <table className="w-full">
@@ -368,194 +710,63 @@ export default function DashboardPage() {
             </table>
           </div>
         </div>
+      )}
 
-        {/* Today's Schedule */}
+      {/* Recent Activity */}
+      {activities.length > 0 && (
         <div className="bg-card border border-bdr rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-bdr flex items-center justify-between">
-            <h3 className="font-heading font-bold text-white tracking-wide text-sm">Today</h3>
-            <Link
-              href="/scheduling"
-              className="text-xs text-accent hover:text-orange-400 font-heading font-semibold tracking-wider uppercase"
-            >
-              Cal &rarr;
-            </Link>
+          <div className="px-5 py-3 border-b border-bdr">
+            <h3 className="font-heading font-bold text-white tracking-wide">Recent Activity</h3>
           </div>
-          <div className="divide-y divide-bdr max-h-[300px] overflow-y-auto">
-            {todayAppts.map((a) => {
-              const tech = techs.find((t) => t.id === a.tech_id);
-              const startDate = new Date(a.start_time);
-              const startStr = formatTime(startDate);
-              const durationHrs = a.duration_minutes / 60;
-              const vehicleStr = a.vehicle
-                ? `${a.vehicle.year || ''} ${a.vehicle.make} ${a.vehicle.model}`
-                : '';
+          <div className="divide-y divide-bdr max-h-[350px] overflow-y-auto">
+            {activities.map(a => {
+              const timeAgo = (() => {
+                const seconds = Math.floor((Date.now() - new Date(a.created_at).getTime()) / 1000);
+                if (seconds < 60) return 'just now';
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return `${minutes}m ago`;
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return `${hours}h ago`;
+                const days = Math.floor(hours / 24);
+                if (days === 1) return 'yesterday';
+                if (days < 7) return `${days}d ago`;
+                return new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              })();
+
               return (
-                <div key={a.id} className="px-4 py-2 hover:bg-surface/30 transition flex items-center gap-2">
-                  <div className="w-1 h-7 rounded-full shrink-0" style={{ background: tech?.color || '#64748b' }} />
+                <Link
+                  key={a.id}
+                  href={a.work_order ? `/work-orders?open=${a.work_order.id}` : '/work-orders'}
+                  className="px-4 py-3 flex items-center gap-3 hover:bg-surface/50 transition block"
+                >
+                  <div className="w-2 h-2 rounded-full bg-accent shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-slate-200 font-medium truncate">{a.customer?.name}</div>
-                    <div className="text-[11px] text-slate-500 truncate">
-                      {vehicleStr} &middot; {a.job}
+                    <div className="text-sm text-slate-300">
+                      {a.work_order && (
+                        <span className="text-accent font-heading font-bold mr-1.5">{a.work_order.display_id}</span>
+                      )}
+                      {a.action}
                     </div>
+                    {a.details && (
+                      <div className="text-xs text-slate-600 truncate mt-0.5">{a.details}</div>
+                    )}
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[11px] text-slate-300 font-medium">{startStr}</div>
-                    <div className="text-[11px] text-slate-500">{durationHrs}h</div>
-                  </div>
-                </div>
+                  <span className="text-[10px] text-slate-600 shrink-0">{timeAgo}</span>
+                </Link>
               );
             })}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Quick Add WO Modal */}
-      <Modal open={showQuickAdd} onClose={() => { setShowQuickAdd(false); setQaShowDropdown(false); }} title="New Work Order">
-        <div className="space-y-4">
-          {/* Customer Search */}
-          <div className="relative">
-            <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-              Customer *
-            </label>
-            <input
-              value={qaCustomerSearch}
-              onChange={(e) => handleCustomerSearch(e.target.value)}
-              onFocus={() => { if (qaCustomerResults.length > 0 && !qaSelectedCustomer) setQaShowDropdown(true); }}
-              className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-accent/50 font-body"
-              placeholder="Type to search customers..."
-            />
-            {qaSelectedCustomer && (
-              <button
-                onClick={() => { setQaSelectedCustomer(null); setQaCustomerSearch(''); setQaCustomerVehicles([]); setQaVehicleId(''); }}
-                className="absolute right-3 top-[34px] text-slate-500 hover:text-white"
-              >
-                <Icon d={icons.x} size={14} />
-              </button>
-            )}
-            {qaShowDropdown && qaCustomerResults.length > 0 && (
-              <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-card border border-bdr rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                {qaCustomerResults.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => selectCustomer(c)}
-                    className="w-full px-3 py-2.5 text-left hover:bg-surface/50 transition flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="text-sm text-white">{c.name}</div>
-                      <div className="text-xs text-slate-500">{c.phone || c.email || ''}</div>
-                    </div>
-                    <span className="text-xs text-slate-500">{c.vehicle_count ?? 0} vehicles</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {qaShowDropdown && qaCustomerSearch.trim() && qaCustomerResults.length === 0 && (
-              <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-card border border-bdr rounded-lg shadow-xl p-3 text-sm text-slate-500">
-                No customers found.
-              </div>
-            )}
-          </div>
-
-          {/* Vehicle + Priority */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Vehicle *
-              </label>
-              <select
-                value={qaVehicleId}
-                onChange={(e) => setQaVehicleId(e.target.value)}
-                disabled={!qaSelectedCustomer}
-                className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-300 focus:outline-none focus:border-accent/50 font-body disabled:opacity-40"
-              >
-                <option value="">{qaSelectedCustomer ? 'Select vehicle...' : 'Select customer first'}</option>
-                {qaCustomerVehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.year || ''} {v.make} {v.model} {v.plate ? `(${v.plate})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Priority
-              </label>
-              <select
-                value={qaPriority}
-                onChange={(e) => setQaPriority(e.target.value as Priority)}
-                className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-400 focus:outline-none focus:border-accent/50 font-body"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-              Job Description *
-            </label>
-            <input
-              value={qaJob}
-              onChange={(e) => setQaJob(e.target.value)}
-              className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-accent/50 font-body"
-              placeholder="e.g. Brake pad replacement"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Assigned Tech
-              </label>
-              <select
-                value={qaTechId}
-                onChange={(e) => setQaTechId(e.target.value)}
-                className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-400 focus:outline-none focus:border-accent/50 font-body"
-              >
-                <option value="">Select tech...</option>
-                {techs.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Est. Hours
-              </label>
-              <input
-                type="number"
-                value={qaHours}
-                onChange={(e) => setQaHours(e.target.value)}
-                className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-accent/50 font-body"
-                placeholder="0.0"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-              Notes
-            </label>
-            <textarea
-              rows={3}
-              value={qaNotes}
-              onChange={(e) => setQaNotes(e.target.value)}
-              className="w-full bg-bg border border-bdr rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-accent/50 font-body resize-none"
-              placeholder="Customer complaint, initial observations..."
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Btn variant="secondary" onClick={() => setShowQuickAdd(false)}>
-              Cancel
-            </Btn>
-            <Btn onClick={handleCreateWO} disabled={!qaSelectedCustomer || !qaVehicleId || !qaJob.trim()}>
-              Create Work Order
-            </Btn>
-          </div>
-        </div>
-      </Modal>
+      {/* New Work Order Modal */}
+      <NewWOModal
+        open={showQuickAdd}
+        onClose={() => setShowQuickAdd(false)}
+        techs={techs}
+        onCreated={refreshWorkOrders}
+        defaultLaborRate={shopSettings?.default_labor_rate ? Number(shopSettings.default_labor_rate) : 125}
+      />
     </div>
   );
 }

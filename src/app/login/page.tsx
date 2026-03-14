@@ -1,7 +1,6 @@
 'use client';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { shopConfig } from '@/lib/config';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -38,9 +37,9 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="font-heading text-3xl font-bold text-white tracking-wide">
-            {shopConfig.name.toUpperCase()}
+            SHOPFORGE
           </h1>
-          <p className="text-slate-500 text-sm mt-1">{shopConfig.tagline}</p>
+          <p className="text-slate-500 text-sm mt-1">Shop Management Platform</p>
         </div>
         <form onSubmit={handleLogin} className="bg-card border border-bdr rounded-xl p-6 space-y-4">
           {error && (

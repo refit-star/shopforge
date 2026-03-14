@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { syncInvoiceToQB, syncPaymentToQB } from '@/lib/quickbooks';
 
 export async function GET(
   _req: NextRequest,
@@ -45,9 +46,13 @@ export async function PATCH(
   if ('status' in body) {
     updates.status = body.status;
 
-    // If marking as Paid, set paid_at
     if (body.status === 'Paid') {
       updates.paid_at = new Date().toISOString();
+    }
+    if (body.status === 'Void') {
+      updates.paid_at = null;
+      updates.payment_method = null;
+      updates.voided_at = new Date().toISOString();
     }
   }
 
@@ -75,6 +80,14 @@ export async function PATCH(
   if (error) {
     const status = error.code === 'PGRST116' ? 404 : 500;
     return NextResponse.json({ error: error.message }, { status });
+  }
+
+  // Best-effort QB sync (fire-and-forget)
+  if (body.status === 'Sent' && data.shop_id) {
+    syncInvoiceToQB(id, data.shop_id).catch(() => {});
+  }
+  if (body.status === 'Paid' && data.shop_id) {
+    syncPaymentToQB(id, data.shop_id, data.payment_method).catch(() => {});
   }
 
   return NextResponse.json({

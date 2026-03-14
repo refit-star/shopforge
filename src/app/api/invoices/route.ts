@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { shopConfig } from '@/lib/config';
+import { getFullSettings } from '@/lib/settings-server';
+import { syncInvoiceToQB } from '@/lib/quickbooks';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = createServerClient();
+  const page = Math.max(1, parseInt(req.nextUrl.searchParams.get('page') || '1', 10));
+  const limit = Math.min(200, Math.max(1, parseInt(req.nextUrl.searchParams.get('limit') || '50', 10)));
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from('invoices')
     .select(`
       *,
@@ -13,8 +18,9 @@ export async function GET() {
       vehicle:vehicles(id, year, make, model),
       invoice_labor_lines(id, description, hours, rate, sort_order),
       invoice_parts_lines(id, name, qty, price, sort_order)
-    `)
-    .order('created_at', { ascending: false });
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -26,7 +32,7 @@ export async function GET() {
     parts_lines: inv.invoice_parts_lines,
   }));
 
-  return NextResponse.json(enriched);
+  return NextResponse.json({ data: enriched, total: count ?? 0, page, limit });
 }
 
 export async function POST(req: NextRequest) {
@@ -79,11 +85,15 @@ export async function POST(req: NextRequest) {
     }));
   }
 
+  // Fetch tax rate from shop settings
+  const settings = await getFullSettings();
+  const taxRate = settings?.tax_rate ? Number(settings.tax_rate) : 0.08;
+
   // Compute totals
   const labor_total = laborLines.reduce((sum, l) => sum + l.hours * l.rate, 0);
   const parts_total = partsLines.reduce((sum, p) => sum + p.qty * p.price, 0);
   const subtotal = labor_total + parts_total;
-  const tax = subtotal * shopConfig.taxRate;
+  const tax = subtotal * taxRate;
   const total = subtotal + tax;
 
   // Insert invoice
@@ -159,6 +169,12 @@ export async function POST(req: NextRequest) {
 
   if (fullError) {
     return NextResponse.json({ error: fullError.message }, { status: 500 });
+  }
+
+  // Best-effort QB sync on creation (primary trigger)
+  const shopId = full.shop_id || invoice.shop_id;
+  if (shopId) {
+    syncInvoiceToQB(invoice.id, shopId).catch(() => {});
   }
 
   return NextResponse.json(

@@ -39,22 +39,27 @@ export async function GET(
     .neq('status', 'Check-In')
     .order('created_at', { ascending: false });
 
-  // Outstanding balance: sum of total from Sent/Overdue invoices
-  const { data: outstandingInvoices } = await supabase
+  // All invoices for this customer (for service history timeline)
+  const { data: invoices } = await supabase
     .from('invoices')
-    .select('total')
+    .select(`
+      id, display_id, status, total, labor_total, parts_total, tax,
+      payment_method, paid_at, created_at,
+      vehicle:vehicles(id, year, make, model)
+    `)
     .eq('customer_id', id)
-    .in('status', ['Sent', 'Overdue']);
+    .order('created_at', { ascending: false });
 
-  const outstanding_balance = (outstandingInvoices || []).reduce(
-    (sum, inv) => sum + Number(inv.total),
-    0
-  );
+  // Outstanding balance: sum of total from Sent/Overdue invoices
+  const outstanding_balance = (invoices || [])
+    .filter(inv => inv.status === 'Sent' || inv.status === 'Overdue')
+    .reduce((sum, inv) => sum + Number(inv.total), 0);
 
   return NextResponse.json({
     ...customer,
     vehicles: vehicles || [],
     service_history: serviceHistory || [],
+    invoices: invoices || [],
     outstanding_balance: Math.round(outstanding_balance * 100) / 100,
   });
 }
@@ -67,7 +72,7 @@ export async function PATCH(
   const supabase = createServerClient();
   const body = await req.json();
 
-  const allowedFields = ['name', 'phone', 'email'];
+  const allowedFields = ['name', 'phone', 'email', 'address', 'city', 'state', 'zip', 'tags'];
   const updates: Record<string, unknown> = {};
 
   for (const key of allowedFields) {

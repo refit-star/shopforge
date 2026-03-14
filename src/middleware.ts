@@ -4,12 +4,19 @@ import { NextResponse, type NextRequest } from 'next/server';
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Skip auth for login page, API routes, and static assets
+  // Skip auth for login page, API routes, static assets, and public portal
   if (
     pathname.startsWith('/login') ||
+    pathname.startsWith('/portal') ||
+    pathname.startsWith('/book') ||
+    pathname.startsWith('/api/portal') ||
+    pathname.startsWith('/api/book') ||
+    pathname.startsWith('/api/admin') ||
     pathname.startsWith('/api/stripe/webhook') ||
+    pathname.startsWith('/api/twilio/webhook') ||
+    pathname === '/api/quickbooks/callback' ||
     pathname.startsWith('/_next') ||
-    pathname.includes('.')
+    /\.(ico|png|jpg|jpeg|svg|gif|webp|css|js|woff2?|ttf|eot|map|txt|xml|json|webmanifest)$/.test(pathname)
   ) {
     return NextResponse.next();
   }

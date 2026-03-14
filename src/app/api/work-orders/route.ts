@@ -23,6 +23,10 @@ function computeTotals(wo: Record<string, unknown>) {
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const status = req.nextUrl.searchParams.get('status');
+  const page = Math.max(1, parseInt(req.nextUrl.searchParams.get('page') || '1', 10));
+  const limit = Math.min(200, Math.max(1, parseInt(req.nextUrl.searchParams.get('limit') || '50', 10)));
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
   let query = supabase
     .from('work_orders')
@@ -33,21 +37,22 @@ export async function GET(req: NextRequest) {
       tech:techs(id, name, color),
       wo_labor_lines(id, description, hours, rate, sort_order),
       wo_parts_lines(id, name, qty, price, sort_order)
-    `)
-    .order('created_at', { ascending: false });
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
 
   if (status) {
     query = query.eq('status', status);
   }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   const enriched = (data || []).map(computeTotals);
-  return NextResponse.json(enriched);
+  return NextResponse.json({ data: enriched, total: count ?? 0, page, limit });
 }
 
 export async function POST(req: NextRequest) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-server';
 import { stripe } from '@/lib/stripe';
+import { syncPaymentToQB } from '@/lib/quickbooks';
 import Stripe from 'stripe';
 
 export async function POST(req: NextRequest) {
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
     const invoiceId = session.metadata?.invoice_id;
 
     if (invoiceId) {
-      const supabase = createServerClient();
+      const supabase = createAdminClient();
 
       const { error } = await supabase
         .from('invoices')
@@ -44,6 +45,17 @@ export async function POST(req: NextRequest) {
       if (error) {
         console.error('Failed to update invoice after Stripe payment:', error.message);
         return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      // Best-effort QB payment sync
+      const { data: inv } = await supabase
+        .from('invoices')
+        .select('shop_id')
+        .eq('id', invoiceId)
+        .single();
+
+      if (inv?.shop_id) {
+        syncPaymentToQB(invoiceId, inv.shop_id, 'Stripe').catch(() => {});
       }
     }
   }

@@ -9,10 +9,10 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg: '#0d0f12',
-        surface: '#13161b',
-        card: '#1a1e26',
-        bdr: '#252a35',
+        bg: 'rgb(var(--color-bg) / <alpha-value>)',
+        surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        card: 'rgb(var(--color-card) / <alpha-value>)',
+        bdr: 'rgb(var(--color-bdr) / <alpha-value>)',
         accent: 'var(--accent, #f97316)',
         success: '#22c55e',
         warning: '#fbbf24',
