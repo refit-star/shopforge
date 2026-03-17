@@ -17,7 +17,7 @@ const SETTINGS_TABS = [
   { key: 'integrations', label: 'Integrations' },
   { key: 'notifications', label: 'Notifications' },
   { key: 'booking', label: 'Booking' },
-  { key: 'import', label: 'Import Data' },
+  { key: 'import', label: 'Import / Export Data' },
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number]['key'];
@@ -98,6 +98,8 @@ function SettingsPage() {
   const [intTwilioPhone, setIntTwilioPhone] = useState('');
   const [intStripeSecret, setIntStripeSecret] = useState('');
   const [intStripePub, setIntStripePub] = useState('');
+  const [intStripeWebhook, setIntStripeWebhook] = useState('');
+  const [testingStripe, setTestingStripe] = useState(false);
   const [intPtUser, setIntPtUser] = useState('');
   const [intPtKey, setIntPtKey] = useState('');
   const [testingPt, setTestingPt] = useState(false);
@@ -143,6 +145,7 @@ function SettingsPage() {
     setIntTwilioPhone(data.twilio_phone_number || '');
     setIntStripeSecret(data.stripe_secret_key || '');
     setIntStripePub(data.stripe_publishable_key || '');
+    setIntStripeWebhook(data.stripe_webhook_secret || '');
     setIntPtUser(data.partstech_username || '');
     setIntPtKey(data.partstech_api_key || '');
     setIntPlateKey(data.plate_lookup_api_key || '');
@@ -291,6 +294,25 @@ function SettingsPage() {
     }
   };
 
+  const handleLogoRemove = async () => {
+    setSettings((prev) => prev ? { ...prev, logo_url: null } : prev);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logo_url: null }),
+      });
+      if (!res.ok) {
+        alert('Failed to remove logo');
+        // Re-fetch to restore actual state
+        const r = await fetch('/api/settings');
+        if (r.ok) setSettings(await r.json());
+      }
+    } catch {
+      alert('Failed to remove logo');
+    }
+  };
+
   const isMasked = (v: string) => v.startsWith('\u2022\u2022\u2022\u2022');
 
   const saveIntegrations = async () => {
@@ -303,6 +325,7 @@ function SettingsPage() {
     if (!isMasked(intTwilioPhone)) payload.twilio_phone_number = intTwilioPhone || null;
     if (!isMasked(intStripeSecret)) payload.stripe_secret_key = intStripeSecret || null;
     if (!isMasked(intStripePub)) payload.stripe_publishable_key = intStripePub || null;
+    if (!isMasked(intStripeWebhook)) payload.stripe_webhook_secret = intStripeWebhook || null;
     if (intPtUser !== (settings?.partstech_username || '')) payload.partstech_username = intPtUser || null;
     if (!isMasked(intPtKey)) payload.partstech_api_key = intPtKey || null;
     if (!isMasked(intPlateKey)) payload.plate_lookup_api_key = intPlateKey || null;
@@ -325,6 +348,7 @@ function SettingsPage() {
       setIntTwilioPhone(data.twilio_phone_number || '');
       setIntStripeSecret(data.stripe_secret_key || '');
       setIntStripePub(data.stripe_publishable_key || '');
+      setIntStripeWebhook(data.stripe_webhook_secret || '');
       setIntPtUser(data.partstech_username || '');
       setIntPtKey(data.partstech_api_key || '');
       setIntPlateKey(data.plate_lookup_api_key || '');
@@ -438,7 +462,12 @@ function SettingsPage() {
         ))}
       </div>
 
-      {activeTab === 'import' && <ImportWizard />}
+      {activeTab === 'import' && (
+        <>
+          <ImportWizard />
+          <ExportDataSection />
+        </>
+      )}
 
       {activeTab === 'profile' && (<>
       {/* Appearance */}
@@ -488,15 +517,15 @@ function SettingsPage() {
               </div>
               <div className="flex-1">
                 <label className={lbl}>Upload Logo</label>
-                <p className="text-[10px] text-slate-600 mb-2">PNG, JPG, WebP, or SVG. Max 2MB. Displayed on printed documents.</p>
+                <p className="text-[10px] text-slate-600 mb-2">PNG, JPG, or WebP. Max 2MB. Displayed on printed documents.</p>
                 <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-bg border border-bdr text-sm text-slate-300 hover:text-white hover:border-accent/50 transition cursor-pointer">
                   <Icon d={icons.image} size={14} />
                   {logoUploading ? 'Uploading...' : 'Choose File'}
-                  <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoUpload} disabled={logoUploading} className="hidden" />
+                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoUpload} disabled={logoUploading} className="hidden" />
                 </label>
                 {settings.logo_url && (
                   <button
-                    onClick={() => { upd('logo_url', ''); }}
+                    onClick={handleLogoRemove}
                     className="ml-3 text-xs text-slate-500 hover:text-error transition"
                   >
                     Remove
@@ -806,6 +835,43 @@ function SettingsPage() {
                     autoComplete="off"
                   />
                 </div>
+                <div className="sm:col-span-2">
+                  <label className={lbl}>Webhook Secret</label>
+                  <input
+                    type="password"
+                    value={intStripeWebhook}
+                    onChange={e => { setIntStripeWebhook(e.target.value); setIntDirty(true); }}
+                    onFocus={e => { if (isMasked(e.target.value)) { setIntStripeWebhook(''); setIntDirty(true); } }}
+                    className={`${inp} w-full`}
+                    placeholder="whsec_..."
+                    autoComplete="off"
+                  />
+                  <p className="text-[10px] text-slate-600 mt-1">From Stripe Dashboard → Developers → Webhooks. Endpoint URL: {typeof window !== 'undefined' ? window.location.origin : ''}/api/stripe/webhook</p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <Btn small variant="secondary" onClick={async () => {
+                  setTestingStripe(true);
+                  setTestResult(null);
+                  try {
+                    const res = await fetch('/api/integrations/test', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ service: 'stripe' }),
+                    });
+                    const data = await res.json();
+                    setTestResult({ service: 'stripe', ok: res.ok, msg: res.ok ? data.message : data.error });
+                  } catch {
+                    setTestResult({ service: 'stripe', ok: false, msg: 'Network error' });
+                  }
+                  setTestingStripe(false);
+                  setTimeout(() => setTestResult(null), 5000);
+                }} disabled={testingStripe || !intStripeSecret || intDirty}>
+                  <span className="flex items-center gap-1.5">
+                    <Icon d={icons.refresh} size={12} />
+                    {testingStripe ? 'Testing...' : 'Test Connection'}
+                  </span>
+                </Btn>
               </div>
             </div>
 
@@ -1682,6 +1748,63 @@ function SettingsPage() {
         )}
       </div>
       </>)}
+    </div>
+  );
+}
+
+// ============================================================
+// EXPORT DATA SECTION
+// ============================================================
+function ExportDataSection() {
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  const doExport = async (endpoint: string, filename: string) => {
+    setExporting(endpoint);
+    try {
+      const res = await fetch(`/api/export/${endpoint}`);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Export failed. Please try again.');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exports = [
+    { key: 'customers', label: 'Export Customers', file: 'customers.csv', desc: 'Name, phone, email, address, tags' },
+    { key: 'vehicles', label: 'Export Vehicles', file: 'vehicles.csv', desc: 'Customer, year, make, model, VIN, plate' },
+    { key: 'parts-inventory', label: 'Export Parts Inventory', file: 'parts-inventory.csv', desc: 'Name, part number, category, qty, cost, price, vendor' },
+  ];
+
+  return (
+    <div className="bg-card border border-bdr rounded-xl p-6 mt-6">
+      <h2 className="font-heading text-lg font-bold text-white tracking-wide mb-1">Export Data</h2>
+      <p className="text-sm text-slate-500 mb-5">Download your shop data as CSV files.</p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {exports.map(e => (
+          <button
+            key={e.key}
+            onClick={() => doExport(e.key, e.file)}
+            disabled={exporting !== null}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl border border-bdr bg-bg hover:border-accent/40 hover:bg-accent/5 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Icon d={icons.download} size={20} stroke={exporting === e.key ? '#f97316' : '#64748b'} />
+            <span className="text-sm font-heading font-semibold text-white">
+              {exporting === e.key ? 'Exporting...' : e.label}
+            </span>
+            <span className="text-[11px] text-slate-500 leading-tight text-center">{e.desc}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
