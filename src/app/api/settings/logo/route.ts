@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
@@ -10,9 +11,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate file type
-  const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
   if (!allowedTypes.includes(file.type)) {
-    return NextResponse.json({ error: 'Invalid file type. Use PNG, JPG, WebP, or SVG.' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid file type. Use PNG, JPG, or WebP.' }, { status: 400 });
   }
 
   // Max 2MB
@@ -43,11 +44,11 @@ export async function POST(req: NextRequest) {
     .from('logos')
     .upload(fileName, buffer, {
       contentType: file.type,
-      upsert: false,
+      upsert: true,
     });
 
   if (uploadError) {
-    return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    return internalError(uploadError, `logo upload (type=${file.type}, size=${file.size})`);
   }
 
   // Get public URL
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
+    return internalError(updateError);
   }
 
   return NextResponse.json({ logo_url: logoUrl });
