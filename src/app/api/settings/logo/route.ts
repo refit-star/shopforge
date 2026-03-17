@@ -5,30 +5,22 @@ import { internalError } from '@/lib/api-error';
 export async function DELETE() {
   const supabase = createServerClient();
 
-  // Step 1: verify we can read the shop
   const { data: shop, error: readErr } = await supabase
     .from('shops')
-    .select('id, logo_url')
+    .select('id')
     .single();
 
   if (readErr || !shop) {
-    return NextResponse.json(
-      { error: `DEBUG: shop read failed: ${readErr?.message || 'no shop found'}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Could not resolve shop' }, { status: 403 });
   }
 
-  // Step 2: update logo_url to null
   const { error: updateErr } = await supabase
     .from('shops')
     .update({ logo_url: null, updated_at: new Date().toISOString() })
     .eq('id', shop.id);
 
   if (updateErr) {
-    return NextResponse.json(
-      { error: `DEBUG: update failed: ${updateErr.message}` },
-      { status: 500 }
-    );
+    return internalError(updateErr, 'logo delete');
   }
 
   return NextResponse.json({ logo_url: null });
@@ -80,10 +72,7 @@ export async function POST(req: NextRequest) {
     });
 
   if (uploadError) {
-    return NextResponse.json(
-      { error: `DEBUG: storage upload failed: ${uploadError.message}` },
-      { status: 500 }
-    );
+    return internalError(uploadError, `logo storage upload (type=${file.type}, size=${file.size})`);
   }
 
   // Get public URL
@@ -97,14 +86,10 @@ export async function POST(req: NextRequest) {
   const { error: updateError } = await supabase
     .from('shops')
     .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
-    .select()
-    .single();
+    .eq('id', shop.id);
 
   if (updateError) {
-    return NextResponse.json(
-      { error: `DEBUG: db update failed: ${updateError.message}` },
-      { status: 500 }
-    );
+    return internalError(updateError, 'logo db update');
   }
 
   return NextResponse.json({ logo_url: logoUrl });
