@@ -2,6 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { internalError } from '@/lib/api-error';
 
+export async function DELETE() {
+  const supabase = createServerClient();
+  const { error } = await supabase
+    .from('shops')
+    .update({ logo_url: null, updated_at: new Date().toISOString() })
+    .select()
+    .single();
+
+  if (error) {
+    return internalError(error, 'logo delete');
+  }
+
+  return NextResponse.json({ logo_url: null });
+}
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const file = formData.get('file') as File | null;
