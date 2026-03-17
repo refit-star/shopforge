@@ -295,22 +295,18 @@ function SettingsPage() {
   };
 
   const handleLogoRemove = async () => {
-    const prev = settings?.logo_url;
-    setSettings((s) => s ? { ...s, logo_url: '' as unknown as null } : s);
-    try {
-      const res = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logo_url: '' }),
-      });
-      if (!res.ok) {
-        alert('Failed to remove logo');
-        setSettings((s) => s ? { ...s, logo_url: prev ?? null } : s);
-      }
-    } catch {
-      alert('Failed to remove logo');
-      setSettings((s) => s ? { ...s, logo_url: prev ?? null } : s);
-    }
+    if (!settings) return;
+    const updated = { ...settings, logo_url: '' as unknown as null };
+    setSettings(updated);
+    setSaving(true);
+    await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
   const isMasked = (v: string) => v.startsWith('\u2022\u2022\u2022\u2022');
