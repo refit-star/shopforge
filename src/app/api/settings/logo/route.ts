@@ -4,14 +4,31 @@ import { internalError } from '@/lib/api-error';
 
 export async function DELETE() {
   const supabase = createServerClient();
-  const { error } = await supabase
+
+  // Step 1: verify we can read the shop
+  const { data: shop, error: readErr } = await supabase
     .from('shops')
-    .update({ logo_url: null, updated_at: new Date().toISOString() })
-    .select()
+    .select('id, logo_url')
     .single();
 
-  if (error) {
-    return internalError(error, 'logo delete');
+  if (readErr || !shop) {
+    return NextResponse.json(
+      { error: `DEBUG: shop read failed: ${readErr?.message || 'no shop found'}` },
+      { status: 500 }
+    );
+  }
+
+  // Step 2: update logo_url to null
+  const { error: updateErr } = await supabase
+    .from('shops')
+    .update({ logo_url: null, updated_at: new Date().toISOString() })
+    .eq('id', shop.id);
+
+  if (updateErr) {
+    return NextResponse.json(
+      { error: `DEBUG: update failed: ${updateErr.message}` },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ logo_url: null });
@@ -63,7 +80,10 @@ export async function POST(req: NextRequest) {
     });
 
   if (uploadError) {
-    return internalError(uploadError, `logo upload (type=${file.type}, size=${file.size})`);
+    return NextResponse.json(
+      { error: `DEBUG: storage upload failed: ${uploadError.message}` },
+      { status: 500 }
+    );
   }
 
   // Get public URL
@@ -81,7 +101,10 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (updateError) {
-    return internalError(updateError);
+    return NextResponse.json(
+      { error: `DEBUG: db update failed: ${updateError.message}` },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ logo_url: logoUrl });
