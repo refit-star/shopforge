@@ -295,21 +295,21 @@ function SettingsPage() {
   };
 
   const handleLogoRemove = async () => {
-    setSettings((prev) => prev ? { ...prev, logo_url: null } : prev);
+    const prev = settings?.logo_url;
+    setSettings((s) => s ? { ...s, logo_url: '' as unknown as null } : s);
     try {
       const res = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logo_url: null }),
+        body: JSON.stringify({ logo_url: '' }),
       });
       if (!res.ok) {
         alert('Failed to remove logo');
-        // Re-fetch to restore actual state
-        const r = await fetch('/api/settings');
-        if (r.ok) setSettings(await r.json());
+        setSettings((s) => s ? { ...s, logo_url: prev ?? null } : s);
       }
     } catch {
       alert('Failed to remove logo');
+      setSettings((s) => s ? { ...s, logo_url: prev ?? null } : s);
     }
   };
 
