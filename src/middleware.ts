@@ -7,6 +7,7 @@ export async function middleware(req: NextRequest) {
   // Skip auth for login page, API routes, static assets, and public portal
   if (
     pathname.startsWith('/admin') ||
+    pathname.startsWith('/auth') ||
     pathname.startsWith('/login') ||
     pathname.startsWith('/portal') ||
     pathname.startsWith('/book') ||

@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
 
   const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
     owner_email,
-    { redirectTo: `${baseUrl}/login/${slug}` }
+    { redirectTo: `${baseUrl}/auth/callback` }
   );
 
   if (inviteError) {
