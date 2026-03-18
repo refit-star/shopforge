@@ -211,10 +211,14 @@ export default function TimeClockPage() {
                 </div>
               ))}
 
-              {/* Assigned Jobs */}
+              {/* Assigned Jobs — today only */}
               {(() => {
+                const todayStr = new Date().toLocaleDateString('en-CA');
                 const assignedWOs = workOrders.filter(
-                  w => w.tech_id === tech.id && w.status !== 'Completed'
+                  w => w.tech_id === tech.id && w.status !== 'Completed' && (
+                    w.scheduled_date === todayStr ||
+                    w.status === 'Check-In' || w.status === 'In Progress' || w.status === 'Waiting on Parts'
+                  )
                 );
                 if (assignedWOs.length === 0) return null;
                 // Filter out WOs that already have an active timer
