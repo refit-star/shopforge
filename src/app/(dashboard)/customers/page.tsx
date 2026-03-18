@@ -83,6 +83,15 @@ function CustomersContent() {
   const [newState, setNewState] = useState('');
   const [newZip, setNewZip] = useState('');
   const [creating, setCreating] = useState(false);
+  // Inline vehicle on new customer
+  const [showNewVehicle, setShowNewVehicle] = useState(false);
+  const [nvYear, setNvYear] = useState('');
+  const [nvMake, setNvMake] = useState('');
+  const [nvModel, setNvModel] = useState('');
+  const [nvVin, setNvVin] = useState('');
+  const [nvMileage, setNvMileage] = useState('');
+  const [nvPlate, setNvPlate] = useState('');
+  const [nvPlateState, setNvPlateState] = useState('');
 
   // Add Vehicle form (inside detail)
   const [showAddVehicle, setShowAddVehicle] = useState(false);
@@ -172,10 +181,29 @@ function CustomersContent() {
         body: JSON.stringify({ name: newName.trim(), phone: newPhone.trim() || null, email: newEmail.trim() || null, address: newAddress.trim() || null, city: newCity.trim() || null, state: newState.trim() || null, zip: newZip.trim() || null }),
       });
       if (res.ok) {
+        const customer = await res.json();
+        // Create vehicle if fields are filled
+        if (nvMake.trim() && nvModel.trim()) {
+          await fetch('/api/vehicles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customer_id: customer.id,
+              year: nvYear ? parseInt(nvYear) : null,
+              make: nvMake.trim(),
+              model: nvModel.trim(),
+              vin: nvVin.trim() || null,
+              mileage: nvMileage ? parseInt(nvMileage) : null,
+              plate: nvPlate.trim() || null,
+            }),
+          });
+        }
         setShowAddCustomer(false);
         setNewName(''); setNewPhone(''); setNewEmail('');
         setNewAddress(''); setNewCity(''); setNewState(''); setNewZip('');
+        setShowNewVehicle(false); setNvYear(''); setNvMake(''); setNvModel(''); setNvVin(''); setNvMileage(''); setNvPlate(''); setNvPlateState('');
         fetchCustomers(search);
+        openCustomer(customer);
       }
     } finally {
       setCreating(false);
@@ -405,6 +433,71 @@ function CustomersContent() {
               <input value={newZip} onChange={e => setNewZip(e.target.value)} className={inputCls} placeholder="90210" />
             </div>
           </div>
+          {/* Optional Vehicle */}
+          <div className="border border-bdr rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowNewVehicle(!showNewVehicle)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface/30 transition"
+            >
+              <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                <Icon d={showNewVehicle ? icons.x : icons.plus} size={12} />{showNewVehicle ? 'Hide Vehicle' : 'Add Vehicle'}
+              </span>
+            </button>
+            {showNewVehicle && (
+              <div className="px-4 pb-4 space-y-3 border-t border-bdr">
+                <div className="pt-3">
+                  <label className={labelCls}>Plate Lookup</label>
+                  <PlateInput
+                    plate={nvPlate}
+                    state={nvPlateState}
+                    onPlateChange={setNvPlate}
+                    onStateChange={setNvPlateState}
+                    onDecoded={(result) => {
+                      if (result.year) setNvYear(String(result.year));
+                      if (result.make) setNvMake(result.make);
+                      if (result.model) setNvModel(result.model);
+                      if (result.vin) setNvVin(result.vin);
+                    }}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className={labelCls}>Year</label>
+                    <input value={nvYear} onChange={e => setNvYear(e.target.value)} className={inputCls} placeholder="2024" type="number" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Make</label>
+                    <input value={nvMake} onChange={e => setNvMake(e.target.value)} className={inputCls} placeholder="Ford" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Model</label>
+                    <input value={nvModel} onChange={e => setNvModel(e.target.value)} className={inputCls} placeholder="F-150" />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>VIN</label>
+                  <VinInput
+                    value={nvVin}
+                    onChange={setNvVin}
+                    onDecoded={(result) => {
+                      if (result.year) setNvYear(String(result.year));
+                      if (result.make) setNvMake(result.make);
+                      if (result.model) setNvModel(result.model);
+                    }}
+                    className={inputCls}
+                    placeholder="Paste VIN to auto-decode"
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Mileage</label>
+                  <input value={nvMileage} onChange={e => setNvMileage(e.target.value)} className={inputCls} placeholder="0" type="number" />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <Btn variant="secondary" onClick={() => setShowAddCustomer(false)}>Cancel</Btn>
             <Btn onClick={handleAddCustomer} disabled={creating || !newName.trim()}>

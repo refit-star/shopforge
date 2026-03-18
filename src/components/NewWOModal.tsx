@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Icon, icons } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Modal';
 import { Btn } from '@/components/ui/Btn';
+import { PlateInput } from '@/components/ui/PlateInput';
+import { VinInput } from '@/components/ui/VinInput';
 import { fmt } from '@/lib/utils';
 import type { Customer, Vehicle, Tech, Priority, CannedJob } from '@/lib/types';
 
@@ -47,6 +49,20 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
   const [newPartName, setNewPartName] = useState('');
   const [newPartQty, setNewPartQty] = useState('1');
   const [newPartPrice, setNewPartPrice] = useState('');
+
+  // Inline new customer + vehicle
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [ncName, setNcName] = useState('');
+  const [ncPhone, setNcPhone] = useState('');
+  const [showNcVehicle, setShowNcVehicle] = useState(false);
+  const [ncvYear, setNcvYear] = useState('');
+  const [ncvMake, setNcvMake] = useState('');
+  const [ncvModel, setNcvModel] = useState('');
+  const [ncvVin, setNcvVin] = useState('');
+  const [ncvPlate, setNcvPlate] = useState('');
+  const [ncvPlateState, setNcvPlateState] = useState('');
+  const [ncvMileage, setNcvMileage] = useState('');
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
 
   const handleCustomerSearch = (q: string) => {
     setCustomerSearch(q);
@@ -121,6 +137,45 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
     setFilledFromTemplate(true);
   };
 
+  const handleCreateCustomer = async () => {
+    if (!ncName.trim()) return;
+    setCreatingCustomer(true);
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: ncName.trim(), phone: ncPhone.trim() || null }),
+      });
+      if (!res.ok) return;
+      const customer = await res.json();
+
+      // Create vehicle if filled
+      if (ncvMake.trim() && ncvModel.trim()) {
+        await fetch('/api/vehicles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_id: customer.id,
+            year: ncvYear ? parseInt(ncvYear) : null,
+            make: ncvMake.trim(),
+            model: ncvModel.trim(),
+            vin: ncvVin.trim() || null,
+            mileage: ncvMileage ? parseInt(ncvMileage) : null,
+            plate: ncvPlate.trim() || null,
+          }),
+        });
+      }
+
+      // Select the new customer and load vehicles
+      setShowNewCustomer(false);
+      setNcName(''); setNcPhone('');
+      setShowNcVehicle(false); setNcvYear(''); setNcvMake(''); setNcvModel(''); setNcvVin(''); setNcvPlate(''); setNcvPlateState(''); setNcvMileage('');
+      await selectCustomer(customer);
+    } finally {
+      setCreatingCustomer(false);
+    }
+  };
+
   const resetForm = () => {
     setCustomerSearch('');
     setSelectedCustomer(null);
@@ -138,6 +193,9 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
     setShowDropdown(false);
     setSelectedCannedJobId('');
     setFilledFromTemplate(false);
+    setShowNewCustomer(false);
+    setNcName(''); setNcPhone('');
+    setShowNcVehicle(false); setNcvYear(''); setNcvMake(''); setNcvModel(''); setNcvVin(''); setNcvPlate(''); setNcvPlateState(''); setNcvMileage('');
   };
 
   const handleCreate = async () => {
@@ -209,11 +267,115 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
             </div>
           )}
           {showDropdown && customerSearch.trim() && customerResults.length === 0 && (
-            <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-card border border-bdr rounded-lg shadow-xl p-3 text-sm text-slate-500">
-              No customers found.
+            <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-card border border-bdr rounded-lg shadow-xl p-3">
+              <div className="text-sm text-slate-500 mb-2">No customers found.</div>
+              <button
+                onClick={() => { setShowDropdown(false); setShowNewCustomer(true); setNcName(customerSearch); }}
+                className="text-accent hover:text-orange-400 text-xs font-heading font-bold uppercase tracking-wider flex items-center gap-1"
+              >
+                <Icon d={icons.plus} size={10} />Create &ldquo;{customerSearch.trim()}&rdquo;
+              </button>
             </div>
           )}
+          {!selectedCustomer && !showDropdown && !showNewCustomer && (
+            <button
+              onClick={() => setShowNewCustomer(true)}
+              className="mt-1.5 text-accent hover:text-orange-400 text-[11px] font-heading font-bold uppercase tracking-wider flex items-center gap-1"
+            >
+              <Icon d={icons.plus} size={10} />New Customer
+            </button>
+          )}
         </div>
+
+        {/* Inline New Customer */}
+        {showNewCustomer && !selectedCustomer && (
+          <div className="bg-surface border border-accent/20 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-heading font-semibold text-accent uppercase tracking-wider">New Customer</span>
+              <button onClick={() => setShowNewCustomer(false)} className="text-slate-500 hover:text-white"><Icon d={icons.x} size={14} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>Name *</label>
+                <input value={ncName} onChange={e => setNcName(e.target.value)} className={inp} placeholder="Full name" />
+              </div>
+              <div>
+                <label className={lbl}>Phone</label>
+                <input value={ncPhone} onChange={e => setNcPhone(e.target.value)} className={inp} placeholder="(555) 555-0000" />
+              </div>
+            </div>
+
+            {/* Inline vehicle toggle */}
+            <div className="border border-bdr rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowNcVehicle(!showNcVehicle)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-bg/50 transition"
+              >
+                <Icon d={showNcVehicle ? icons.x : icons.plus} size={12} className="text-slate-500" />
+                <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider">
+                  {showNcVehicle ? 'Hide Vehicle' : 'Add Vehicle'}
+                </span>
+              </button>
+              {showNcVehicle && (
+                <div className="px-3 pb-3 space-y-3 border-t border-bdr pt-3">
+                  <div>
+                    <label className={lbl}>Plate Lookup</label>
+                    <PlateInput
+                      plate={ncvPlate}
+                      state={ncvPlateState}
+                      onPlateChange={setNcvPlate}
+                      onStateChange={setNcvPlateState}
+                      onDecoded={(result) => {
+                        if (result.year) setNcvYear(String(result.year));
+                        if (result.make) setNcvMake(result.make);
+                        if (result.model) setNcvModel(result.model);
+                        if (result.vin) setNcvVin(result.vin);
+                      }}
+                      className={inp}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={lbl}>Year</label>
+                      <input value={ncvYear} onChange={e => setNcvYear(e.target.value)} className={inp} placeholder="2024" type="number" />
+                    </div>
+                    <div>
+                      <label className={lbl}>Make</label>
+                      <input value={ncvMake} onChange={e => setNcvMake(e.target.value)} className={inp} placeholder="Ford" />
+                    </div>
+                    <div>
+                      <label className={lbl}>Model</label>
+                      <input value={ncvModel} onChange={e => setNcvModel(e.target.value)} className={inp} placeholder="F-150" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={lbl}>VIN</label>
+                    <VinInput
+                      value={ncvVin}
+                      onChange={setNcvVin}
+                      onDecoded={(result) => {
+                        if (result.year) setNcvYear(String(result.year));
+                        if (result.make) setNcvMake(result.make);
+                        if (result.model) setNcvModel(result.model);
+                      }}
+                      className={inp}
+                      placeholder="Paste VIN to auto-decode"
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>Mileage</label>
+                    <input value={ncvMileage} onChange={e => setNcvMileage(e.target.value)} className={inp} placeholder="0" type="number" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <Btn small onClick={handleCreateCustomer} disabled={creatingCustomer || !ncName.trim()}>
+              {creatingCustomer ? 'Creating...' : 'Create Customer'}
+            </Btn>
+          </div>
+        )}
 
         {/* Vehicle + Priority */}
         <div className="grid grid-cols-2 gap-4">
