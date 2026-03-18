@@ -60,10 +60,27 @@ All sensitive credentials live in `shop_secrets` (NOT `shops`). The `shop_secret
 
 Use `internalError()` from `src/lib/api-error.ts` for all 500 responses. It logs the real error server-side via `console.error` and returns a generic message to the client. Never return `error.message` from Supabase/Stripe/Twilio in responses.
 
+## Platform-Wide Credentials with Per-Shop Override
+
+Twilio, Resend, and PlateToVIN use a platform-wide credential pattern. Platform env vars are the default; per-shop keys in `shop_secrets` override when present.
+
+- **`resolveTwilioCreds(secrets)`** (`src/lib/settings-server.ts`) — returns `{ sid, token }` from shop_secrets or `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` env vars
+- **`resolveResendKey(secrets)`** (`src/lib/settings-server.ts`) — returns key from shop_secrets or `RESEND_API_KEY` env var
+- PlateToVIN: `plate_lookup_api_key` in shop_secrets or `PLATE_LOOKUP_API_KEY` env var
+- Stripe: per-shop keys in shop_secrets or `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` env vars
+- QuickBooks: always per-shop (OAuth per merchant)
+- `twilio_phone_number` always per-shop (the number customers text to/from)
+- Email sends as `"{shop_name} <notifications@send.refit.build>"` with Reply-To set to shop email
+- Twilio webhook validates signature using per-shop token with platform token as fallback
+
+Platform env vars: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `RESEND_API_KEY`, `PLATE_LOOKUP_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `ADMIN_PROVISION_KEY`
+
 ## Unauthenticated Routes (Middleware Skip List)
 
 These routes skip auth in `src/middleware.ts`:
 
+- `/admin/*` — admin provisioning pages (own admin key auth)
+- `/auth/*` — Supabase auth callback (invite password setup)
 - `/api/portal/*` — token-based customer portal (estimates, invoices, DVI reports)
 - `/portal/*` — customer portal pages (estimates, invoices, DVI reports)
 - `/api/book/*` — public booking API (slug-based)
@@ -125,8 +142,12 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 
 ### Work Orders & Estimates
 - Full CRUD with labor/parts line items, drag-and-drop kanban
-- Estimate workflow: Draft → Sent → Approved → Convert to WO (copies lines)
-- WO scheduling: Unscheduled/Scheduled columns, date picker on convert
+- Estimate editing: Edit button on Draft/Sent estimates opens modal with pre-populated service, notes, labor/parts lines. Uses PATCH API with full line replacement.
+- Estimate workflow: Draft → Sent → Approved → Convert to WO (copies lines). Approve/Decline buttons available on both Draft and Sent status (for phone-in approvals).
+- Estimate status filter: clickable summary cards (Draft/Sent/Approved/Declined) filter the table
+- WO scheduling: Unscheduled/Scheduled columns collapsed by default, date picker on convert
+- WO deletion: cleans up inspections, time entries, media, and related rows. Only invoices block deletion. UI shows error message on failure instead of hanging.
+- Completed WOs hidden from kanban by default (visible when status filter set to Completed)
 - Digital vehicle inspections with status grid
 - Rich DVI system (see Digital Vehicle Inspections section below)
 - Tech time clocking (see Time Clocking section below)
@@ -204,7 +225,7 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 - Shift clock in/out: one active shift per tech (409 on double clock-in)
 - Job timers: per work order, prevents duplicate active timer on same WO
 - `/time-clock` page: tech cards with live shift timers, active job timers, today's hours summary, full time log
-  - Assigned jobs section on tech cards: shows tech's WOs with "Start Timer" buttons
+  - Assigned jobs section on tech cards: filtered to today's scheduled WOs + actively in-progress WOs (Check-In, In Progress, Waiting on Parts)
   - Job timer start/stop accessible directly from time clock page (not just WO detail)
   - Clock-out confirmation modal: warns if active job timers exist, offers to auto-stop them
   - Time entry editing: inline time inputs on completed entries, save/cancel buttons
@@ -246,10 +267,39 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 - "WEB" badge on calendar blocks and "Online Booking" badge in detail modal for `source: 'online'` appointments
 - Detail modal shows tech assignment dropdown (instead of "Unassigned" text) for unassigned appointments
 
+### Customer Quick Actions
+- Quick Actions bar at top of customer detail slide-over: New WO, Estimate, Inspect, Schedule, Message
+- All pre-fill customer and most recent vehicle — no re-searching
+- New WO: opens `NewWOModal` with `defaultCustomer`/`defaultVehicles` props
+- Estimate: opens `NewEstimateModal` (standalone component at `src/components/NewEstimateModal.tsx`) with same pre-fill props
+- Inspect: one-click creates "Vehicle Inspection" WO + starts inspection + navigates to WO detail
+- Schedule: navigates to `/scheduling?newAppt={customerId}` — auto-opens new appointment modal pre-filled
+- Message: navigates to `/messages?phone={phone}`
+
+### Inline Vehicle Creation
+- Add Customer modal (customers page): collapsible "Add Vehicle" section with PlateInput, VinInput, year/make/model/mileage
+- NewWOModal: "New Customer" button with inline customer + vehicle creation
+- On submit: creates customer first, then vehicle if make+model filled. One form, two API calls.
+
 ### Multi-Tenant Provisioning
 - Admin endpoint: `POST /api/admin/provision-shop` (x-admin-key auth)
-- Creates shop → auth user → user_shops mapping
+- Creates shop → shop_secrets row → auth user → user_shops mapping
+- Optional `area_code` param: auto-buys Twilio number via API, configures SMS webhook, assigns to shop
 - Branded login pages per shop (`/login/[slug]`)
+- Admin provisioning UI: `/admin/provision` — mobile-first form, admin key auth via sessionStorage
+  - Form: shop name, auto-slug, owner name/email, area code, plan selector
+  - Success card with 1-2-3 onboarding flow and login URL copy button
+  - Provision history stored in localStorage
+  - PWA meta tags for iOS/Android home screen bookmarking
+
+### Auth & Invite Flow
+- `/auth/callback` page handles Supabase invite/recovery redirects
+- Parses `#access_token=...&type=invite` from URL hash
+- Shows "Set Your Password" form (password + confirm, min 8 chars)
+- Calls `supabase.auth.setSession()` + `updateUser({ password })` + sets session cookie
+- Redirects to `/login/{slug}` via shop_id → slug resolution (`GET /api/admin/shop-slug?id=`)
+- Provision-shop `redirectTo` set to `/auth/callback` (not `/login/{slug}`)
+- Supabase Dashboard must have `https://app.refit.build/auth/callback` in Redirect URLs allowlist
 
 ### Purchase Orders
 - `vendors` table: name, contact info, account number, notes, active flag (soft-delete)
@@ -354,12 +404,17 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 ### Settings Organization
 - 6-tab layout: Profile, Team & Services, Integrations, Notifications, Booking, Import / Export Data
 - Tab navigation via `?tab=xxx` query params (default: 'profile')
-- **Profile**: shop name, address, phone, email, owner info, logo, labor rate, tax rate, hours, WO/invoice prefixes, invoice footer
+- **Profile**: shop name, address, phone, email, owner info, logo upload/remove (dedicated DELETE endpoint), labor rate, tax rate, hours, WO/invoice prefixes, invoice footer
 - **Team & Services**: technicians (CRUD with color picker), canned jobs with labor/parts line editors, vendors
-- **Integrations**: Twilio, Stripe, Resend, QuickBooks, PartsTech, Plate Lookup
+- **Integrations**: SMS/Email status cards + Twilio phone number picker in main view. Twilio SID/Token and Resend API key in collapsible "Advanced: Use your own credentials" section. Stripe, QuickBooks, PartsTech, Plate Lookup unchanged.
 - **Notifications**: auto-SMS toggles per WO status, estimate approval alert, DVI auto-send estimates toggle, service reminder SMS toggle
 - **Booking**: online booking on/off, lead time, booking window, bookable services
 - **Import / Export Data**: CSV import wizard (dynamically loaded) + export data section with 3 download buttons (customers, vehicles, parts inventory)
+
+### Logo Upload/Remove
+- `POST /api/settings/logo` — uploads to Supabase Storage, updates shops table with explicit `.eq('id', shop.id)` filter
+- `DELETE /api/settings/logo` — sets `logo_url` to null with explicit shop ID filter
+- Supabase `.update()` calls MUST include `.eq()` filter — RLS alone is not sufficient as a WHERE clause
 
 ### First-Run Setup Wizard
 - `SetupWizard` component (`src/components/SetupWizard.tsx`)
@@ -471,8 +526,11 @@ Systematic 5-wave UX overhaul completed. Each wave's fixes are documented below.
 These issues remain after the 5-wave UX overhaul.
 
 ### Scheduling
+- Week navigation: prev/next week arrows + "Today" button. Shows date range for visible week.
+- Scheduled work orders shown on calendar in a "WOs" row above the time grid, grouped by tech. Clickable to open WO detail.
+- Scheduling page accepts `?newAppt={customerId}` to auto-open new appointment modal pre-filled with customer.
 - No drag-and-drop for rescheduling. Must delete and recreate appointments.
-- Week view only. No month or day view.
+- No month or day view.
 - No tech availability display (vacations, off days).
 
 ### Invoicing
