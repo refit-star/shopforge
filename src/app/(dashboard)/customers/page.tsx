@@ -579,6 +579,9 @@ function CustomersContent() {
                     <span className="flex items-center gap-1.5"><Icon d={icons.camera} size={13} />{inspecting ? 'Starting...' : 'Inspect'}</span>
                   </Btn>
                 )}
+                <Btn small variant="secondary" onClick={() => router.push(`/scheduling?newAppt=${c.id}`)}>
+                  <span className="flex items-center gap-1.5"><Icon d={icons.calendar} size={13} />Schedule</span>
+                </Btn>
                 {c.phone && (
                   <Btn small variant="secondary" onClick={() => router.push(`/messages?phone=${encodeURIComponent(c.phone!)}`)}>
                     <span className="flex items-center gap-1.5"><Icon d={icons.message} size={13} />Message</span>

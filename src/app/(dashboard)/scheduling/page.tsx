@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Btn } from '@/components/ui/Btn';
 import { Icon, icons } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Modal';
@@ -24,6 +24,11 @@ const DURATION_OPTIONS = [
 ];
 
 export default function SchedulingPage() {
+  return <Suspense fallback={null}><SchedulingContent /></Suspense>;
+}
+
+function SchedulingContent() {
+  const searchParams = useSearchParams();
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(0);
   const [showNewAppt, setShowNewAppt] = useState(false);
@@ -93,6 +98,26 @@ export default function SchedulingPage() {
     fetch('/api/techs').then(r => r.json()).then(setTechs);
     fetch('/api/settings').then(r => r.json()).then(setShopSettings);
   }, []);
+
+  // Auto-open new appointment from customer page link
+  useEffect(() => {
+    const customerId = searchParams.get('newAppt');
+    if (!customerId) return;
+    fetch(`/api/customers/${customerId}`)
+      .then(r => r.json())
+      .then(data => {
+        setFormCustomer(data.name || '');
+        setSelectedCustomerId(data.id);
+        setCustomerVehicles(data.vehicles || []);
+        if (data.vehicles?.length > 0) {
+          const v = data.vehicles[data.vehicles.length - 1];
+          setFormVehicle(`${v.year || ''} ${v.make} ${v.model}`.trim());
+          setSelectedVehicleId(v.id);
+        }
+        setShowNewAppt(true);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch appointments + scheduled WOs for the week
   useEffect(() => {
