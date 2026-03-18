@@ -425,6 +425,7 @@ export interface ShopSettings {
   twilio_phone_number: string | null;
   stripe_secret_key: string | null;
   stripe_publishable_key: string | null;
+  stripe_webhook_secret: string | null;
   partstech_username: string | null;
   partstech_api_key: string | null;
   sms_auto_templates: Record<string, { enabled: boolean; template: string }> | null;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { getFullSettings } from '@/lib/settings-server';
 import { syncInvoiceToQB } from '@/lib/quickbooks';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     .range(from, to);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   const enriched = (data || []).map((inv) => ({
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
   // Generate display_id
   const { data: idResult, error: idError } = await supabase.rpc('next_inv_id');
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   const display_id = idResult as string;
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (invError) {
-    return NextResponse.json({ error: invError.message }, { status: 500 });
+    return internalError(invError);
   }
 
   // Insert labor lines
@@ -131,7 +132,7 @@ export async function POST(req: NextRequest) {
       );
 
     if (laborError) {
-      return NextResponse.json({ error: laborError.message }, { status: 500 });
+      return internalError(laborError);
     }
   }
 
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
       );
 
     if (partsError) {
-      return NextResponse.json({ error: partsError.message }, { status: 500 });
+      return internalError(partsError);
     }
   }
 
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   // Best-effort QB sync on creation (primary trigger)

@@ -190,6 +190,16 @@ export function SendEmailModal({
   );
 }
 
+/* ── HTML entity escaping to prevent XSS ── */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /* ── Generate the professional HTML email body ── */
 export function generateEmailHTML(opts: {
   docType: string;
@@ -220,7 +230,7 @@ export function generateEmailHTML(opts: {
 
   const laborRows = laborLines.map(l =>
     `<tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333">${l.description}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333">${escapeHtml(l.description)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#666;text-align:right">${l.hours}h x $${l.rate.toFixed(2)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333;text-align:right;font-weight:600">$${(l.hours * l.rate).toFixed(2)}</td>
     </tr>`
@@ -228,7 +238,7 @@ export function generateEmailHTML(opts: {
 
   const partsRows = partsLines.map(p =>
     `<tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333">${p.name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333">${escapeHtml(p.name)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#666;text-align:right">${p.qty} x $${p.price.toFixed(2)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:13px;color:#333;text-align:right;font-weight:600">$${(p.qty * p.price).toFixed(2)}</td>
     </tr>`
@@ -236,7 +246,7 @@ export function generateEmailHTML(opts: {
 
   const ctaButton = paymentLink
     ? `<div style="text-align:center;margin:24px 0">
-        <a href="${paymentLink}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px;letter-spacing:0.5px">Pay Now &rarr;</a>
+        <a href="${escapeHtml(paymentLink)}" style="display:inline-block;background:#f97316;color:#fff;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px;letter-spacing:0.5px">Pay Now &rarr;</a>
       </div>`
     : docType === 'Estimate'
       ? `<div style="text-align:center;margin:24px 0;padding:16px;background:#fef3c7;border-radius:8px">
@@ -248,8 +258,8 @@ export function generateEmailHTML(opts: {
   <!-- Header -->
   <div style="background:#1e293b;padding:24px 32px;border-radius:12px 12px 0 0">
     <table style="width:100%"><tr>
-      <td>${logoUrl ? `<img src="${logoUrl}" alt="${shopName}" style="max-height:40px;max-width:150px" />` : `<span style="font-size:22px;font-weight:700;color:#fff;letter-spacing:1px">${shopName}</span>`}</td>
-      <td style="text-align:right;color:#94a3b8;font-size:12px">${shopAddress}<br/>${shopPhone}${shopEmail ? ' &middot; ' + shopEmail : ''}</td>
+      <td>${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(shopName)}" style="max-height:40px;max-width:150px" />` : `<span style="font-size:22px;font-weight:700;color:#fff;letter-spacing:1px">${escapeHtml(shopName)}</span>`}</td>
+      <td style="text-align:right;color:#94a3b8;font-size:12px">${escapeHtml(shopAddress)}<br/>${escapeHtml(shopPhone)}${shopEmail ? ' &middot; ' + escapeHtml(shopEmail) : ''}</td>
     </tr></table>
   </div>
 
@@ -266,12 +276,12 @@ export function generateEmailHTML(opts: {
 
     <!-- Greeting -->
     <p style="font-size:15px;color:#334155;margin:0 0 20px">
-      Hi ${customer?.name || 'Valued Customer'},
+      Hi ${escapeHtml(customer?.name || 'Valued Customer')},
     </p>
     <p style="font-size:14px;color:#64748b;margin:0 0 24px">
       ${docType === 'Estimate'
-        ? `Please find your estimate below for the requested service${vehicleStr ? ' on your <strong>' + vehicleStr + '</strong>' : ''}. Review the details and let us know if you&rsquo;d like to proceed.`
-        : `Here is your invoice${vehicleStr ? ' for service on your <strong>' + vehicleStr + '</strong>' : ''}. Please review the details below.`
+        ? `Please find your estimate below for the requested service${vehicleStr ? ' on your <strong>' + escapeHtml(vehicleStr) + '</strong>' : ''}. Review the details and let us know if you&rsquo;d like to proceed.`
+        : `Here is your invoice${vehicleStr ? ' for service on your <strong>' + escapeHtml(vehicleStr) + '</strong>' : ''}. Please review the details below.`
       }
     </p>
 
@@ -321,8 +331,8 @@ export function generateEmailHTML(opts: {
 
   <!-- Footer -->
   <div style="background:#f8fafc;padding:20px 32px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0;border-top:none;text-align:center">
-    <p style="margin:0;font-size:12px;color:#94a3b8">${footer}</p>
-    <p style="margin:8px 0 0;font-size:11px;color:#cbd5e1">${shopName} &middot; ${shopAddress}</p>
+    <p style="margin:0;font-size:12px;color:#94a3b8">${escapeHtml(footer)}</p>
+    <p style="margin:8px 0 0;font-size:11px;color:#cbd5e1">${escapeHtml(shopName)} &middot; ${escapeHtml(shopAddress)}</p>
   </div>
 </div>`;
 }

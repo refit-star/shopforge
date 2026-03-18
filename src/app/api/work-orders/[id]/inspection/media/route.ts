@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -19,12 +20,14 @@ export async function POST(
     );
   }
 
-  // Validate file type
-  const isImage = file.type.startsWith('image/');
-  const isVideo = file.type.startsWith('video/');
+  // Validate file type — explicit allowlist (no SVG — can contain scripts)
+  const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+  const videoTypes = ['video/mp4', 'video/quicktime'];
+  const isImage = imageTypes.includes(file.type);
+  const isVideo = videoTypes.includes(file.type);
   if (!isImage && !isVideo) {
     return NextResponse.json(
-      { error: 'File must be an image or video' },
+      { error: 'Invalid file type. Use PNG, JPG, WebP, GIF, MP4, or MOV.' },
       { status: 400 }
     );
   }
@@ -66,7 +69,7 @@ export async function POST(
     .upload(filePath, fileBuffer, { contentType });
 
   if (uploadError) {
-    return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    return internalError(uploadError);
   }
 
   const { data: urlData } = admin.storage
@@ -85,7 +88,7 @@ export async function POST(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data, { status: 201 });
@@ -152,7 +155,7 @@ export async function PATCH(
     .upload(filePath, fileBuffer, { contentType: 'image/jpeg' });
 
   if (uploadError) {
-    return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    return internalError(uploadError);
   }
 
   const { data: urlData } = admin.storage
@@ -167,7 +170,7 @@ export async function PATCH(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -214,7 +217,7 @@ export async function DELETE(
   }
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ ok: true });

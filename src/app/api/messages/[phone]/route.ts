@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { normalizePhone } from '@/lib/phone';
+import { internalError } from '@/lib/api-error';
 
 /** GET /api/messages/[phone] — fetch thread for a phone number */
 export async function GET(
@@ -28,7 +29,7 @@ export async function GET(
     .order('created_at', { ascending: true });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   // Resolve customer from the messages
@@ -94,7 +95,7 @@ export async function PATCH(
     .in('id', matchingIds);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ linked: matchingIds.length });

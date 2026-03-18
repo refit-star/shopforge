@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -18,8 +19,10 @@ export async function POST(
     .single();
 
   if (estError) {
-    const status = estError.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: estError.message }, { status });
+    if (estError.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(estError);
   }
 
   // Fetch estimate labor and parts lines
@@ -38,7 +41,7 @@ export async function POST(
   // Generate WO display_id
   const { data: idResult, error: idError } = await supabase.rpc('next_wo_id');
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   const display_id = idResult as string;
@@ -59,7 +62,7 @@ export async function POST(
     .single();
 
   if (woError) {
-    return NextResponse.json({ error: woError.message }, { status: 500 });
+    return internalError(woError);
   }
 
   // Copy labor lines to wo_labor_lines
@@ -77,7 +80,7 @@ export async function POST(
       .insert(laborRows);
 
     if (laborError) {
-      return NextResponse.json({ error: laborError.message }, { status: 500 });
+      return internalError(laborError);
     }
   }
 
@@ -99,7 +102,7 @@ export async function POST(
       .insert(partsRows);
 
     if (partsError) {
-      return NextResponse.json({ error: partsError.message }, { status: 500 });
+      return internalError(partsError);
     }
   }
 
@@ -124,7 +127,7 @@ export async function POST(
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   return NextResponse.json(full, { status: 201 });

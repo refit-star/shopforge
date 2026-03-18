@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: [] });
   }
 
-  // Escape SQL ILIKE wildcards to prevent unexpected matches
-  const eq = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  // Escape SQL ILIKE wildcards and commas to prevent PostgREST .or() injection
+  const eq = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
 
   const results: SearchResult[] = [];
 

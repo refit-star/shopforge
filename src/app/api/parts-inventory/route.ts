@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
@@ -12,13 +13,14 @@ export async function GET(req: NextRequest) {
     .order('name');
 
   if (q) {
-    query = query.or(`name.ilike.%${q}%,part_number.ilike.%${q}%`);
+    const sq = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
+    query = query.or(`name.ilike.%${sq}%,part_number.ilike.%${sq}%`);
   }
 
   const { data, error } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -50,7 +52,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data, { status: 201 });

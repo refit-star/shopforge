@@ -125,7 +125,8 @@ function downloadCSV(filename: string, csv: string) {
 }
 
 function esc(v: string | number): string {
-  const s = String(v);
+  let s = String(v);
+  if (/^[=+\-@\t]/.test(s)) s = "'" + s;
   return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 

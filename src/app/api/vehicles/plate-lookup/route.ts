@@ -52,12 +52,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Resolve API key: per-shop override → platform env var
-  const { data: shop } = await supabase
-    .from('shops')
-    .select('plate_lookup_api_key')
-    .single();
+  const { getShopSecrets: getSecrets } = await import('@/lib/secrets-server');
+  const shopSecrets = await getSecrets();
 
-  const apiKey = shop?.plate_lookup_api_key || process.env.PLATE_LOOKUP_API_KEY;
+  const apiKey = shopSecrets?.plate_lookup_api_key || process.env.PLATE_LOOKUP_API_KEY;
 
   if (!apiKey) {
     return NextResponse.json(

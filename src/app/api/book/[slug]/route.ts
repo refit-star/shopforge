@@ -20,9 +20,15 @@ export async function POST(
   // Resolve shop
   const { data: shop } = await supabase
     .from('shops')
-    .select('id, name, online_booking_enabled, hours_start, hours_end, booking_lead_hours, booking_window_days, twilio_account_sid, twilio_auth_token, twilio_phone_number')
+    .select('id, name, online_booking_enabled, hours_start, hours_end, booking_lead_hours, booking_window_days, twilio_phone_number')
     .eq('slug', params.slug)
     .single();
+
+  // Fetch Twilio secrets for SMS confirmation (per-shop override or platform fallback)
+  const shopSecretsRaw = shop ? (await supabase.from('shop_secrets').select('twilio_account_sid, twilio_auth_token').eq('shop_id', shop.id).single()).data : null;
+  const twilioSid = shopSecretsRaw?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || '';
+  const twilioToken = shopSecretsRaw?.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || '';
+  const shopSecrets = (twilioSid && twilioToken) ? { twilio_account_sid: twilioSid, twilio_auth_token: twilioToken } : null;
 
   if (!shop || !shop.online_booking_enabled) {
     return NextResponse.json({ error: 'Online booking is not available' }, { status: 404 });
@@ -237,12 +243,12 @@ export async function POST(
   });
 
   // Send confirmation SMS if Twilio is configured (best-effort)
-  if (phone && shop.twilio_account_sid && shop.twilio_auth_token && shop.twilio_phone_number) {
+  if (phone && shopSecrets?.twilio_account_sid && shopSecrets?.twilio_auth_token && shop.twilio_phone_number) {
     const confirmMsg = `Your appointment at ${shop.name} for ${service.name} is confirmed for ${dateStr} at ${timeStr}. Please arrive 10 minutes early.`;
 
     try {
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shop.twilio_account_sid}/Messages.json`;
-      const auth = Buffer.from(`${shop.twilio_account_sid}:${shop.twilio_auth_token}`).toString('base64');
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shopSecrets.twilio_account_sid}/Messages.json`;
+      const auth = Buffer.from(`${shopSecrets.twilio_account_sid}:${shopSecrets.twilio_auth_token}`).toString('base64');
 
       const formData = new URLSearchParams();
       formData.append('From', shop.twilio_phone_number);

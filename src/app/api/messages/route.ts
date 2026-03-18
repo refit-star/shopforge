@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { normalizePhone } from '@/lib/phone';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
     .limit(2000);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   // Fetch customers for name lookup

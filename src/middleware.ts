@@ -11,6 +11,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith('/book') ||
     pathname.startsWith('/api/portal') ||
     pathname.startsWith('/api/book') ||
+    pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/admin') ||
     pathname.startsWith('/api/stripe/webhook') ||
     pathname.startsWith('/api/twilio/webhook') ||

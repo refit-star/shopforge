@@ -21,8 +21,14 @@ export default function LoginForm({ shop }: { shop: ShopInfo }) {
       const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError) throw authError;
       if (data.session) {
-        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
-        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+        await fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          }),
+        });
         window.location.href = '/';
       }
     } catch (err: any) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { sanitizeImport } from '@/lib/csv';
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -70,10 +71,10 @@ export async function POST(req: NextRequest) {
     toInsert.push({
       customer_id: customerId,
       year: r.year ? parseInt(r.year, 10) || null : null,
-      make,
-      model,
-      vin: vin || null,
-      plate: r.plate?.trim() || null,
+      make: sanitizeImport(make),
+      model: sanitizeImport(model),
+      vin: vin ? sanitizeImport(vin) : null,
+      plate: r.plate?.trim() ? sanitizeImport(r.plate.trim()) : null,
     });
 
     if (vin) existingVins.add(vin);

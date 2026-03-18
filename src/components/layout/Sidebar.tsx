@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Icon, icons } from '@/components/ui/Icon';
+import { supabase } from '@/lib/supabase';
 
 interface NavItem {
   path: string;
@@ -58,6 +60,32 @@ interface ShopBranding {
   owner_name: string;
   owner_initials: string;
   logo_url?: string | null;
+}
+
+function LogoutButton() {
+  const [loading, setLoading] = useState(false);
+
+  const handleLogout = async () => {
+    setLoading(true);
+    try {
+      await supabase.auth.signOut();
+      await fetch('/api/auth/session', { method: 'DELETE' });
+    } catch {
+      // Best-effort
+    }
+    window.location.href = '/login';
+  };
+
+  return (
+    <button
+      onClick={handleLogout}
+      disabled={loading}
+      title="Sign out"
+      className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-400/10 transition disabled:opacity-50"
+    >
+      <Icon d={icons.logout} size={18} />
+    </button>
+  );
 }
 
 export const Sidebar = ({ open, onClose, shop }: { open: boolean; onClose: () => void; shop: ShopBranding | null }) => {
@@ -143,10 +171,11 @@ export const Sidebar = ({ open, onClose, shop }: { open: boolean; onClose: () =>
           <div className="w-9 h-9 rounded-full bg-accent/20 flex items-center justify-center text-accent font-heading font-bold text-sm">
             {shop?.owner_initials || '?'}
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-white">{shop?.owner_name || 'Owner'}</div>
             <div className="text-xs text-slate-500">Shop Owner</div>
           </div>
+          <LogoutButton />
         </div>
       </div>
     </aside>

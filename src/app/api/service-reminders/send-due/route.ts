@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { getShopSecrets } from '@/lib/secrets-server';
+import { resolveTwilioCreds } from '@/lib/settings-server';
 
 export async function POST() {
   const supabase = createServerClient();
@@ -8,7 +10,7 @@ export async function POST() {
   // Check if auto-send is enabled
   const { data: shop } = await supabase
     .from('shops')
-    .select('name, phone, sms_auto_templates, twilio_account_sid, twilio_auth_token, twilio_phone_number')
+    .select('name, phone, sms_auto_templates, twilio_phone_number')
     .limit(1)
     .single();
 
@@ -19,7 +21,9 @@ export async function POST() {
     return NextResponse.json({ message: 'Auto-send reminders disabled', sent: 0 });
   }
 
-  if (!shop?.twilio_account_sid || !shop?.twilio_auth_token || !shop?.twilio_phone_number) {
+  const secrets = await getShopSecrets();
+  const twilio = resolveTwilioCreds(secrets);
+  if (!twilio || !shop?.twilio_phone_number) {
     return NextResponse.json({ message: 'Twilio not configured', sent: 0 });
   }
 
@@ -56,11 +60,11 @@ export async function POST() {
       .replace(/\{\{due_date\}\}/g, r.due_date || '');
 
     try {
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shop.twilio_account_sid}/Messages.json`;
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/Messages.json`;
       const res = await fetch(twilioUrl, {
         method: 'POST',
         headers: {
-          'Authorization': 'Basic ' + Buffer.from(`${shop.twilio_account_sid}:${shop.twilio_auth_token}`).toString('base64'),
+          'Authorization': 'Basic ' + Buffer.from(`${twilio.sid}:${twilio.token}`).toString('base64'),
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({

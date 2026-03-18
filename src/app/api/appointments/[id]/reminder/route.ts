@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { getFullSettings } from '@/lib/settings-server';
+import { getFullSettings, resolveTwilioCreds } from '@/lib/settings-server';
+import { internalError } from '@/lib/api-error';
 
 // GET /api/appointments/[id]/reminder — check reminder status
 export async function GET(
@@ -20,7 +21,7 @@ export async function GET(
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   if (!data) {
@@ -69,10 +70,11 @@ export async function POST(
 
     // Try to actually send the SMS via Twilio
     const settings = await getFullSettings();
-    if (settings?.twilio_account_sid && settings?.twilio_auth_token && settings?.twilio_phone_number) {
+    const twilio = resolveTwilioCreds(settings);
+    if (twilio && settings?.twilio_phone_number) {
       try {
         const credentials = Buffer.from(
-          `${settings.twilio_account_sid}:${settings.twilio_auth_token}`
+          `${twilio.sid}:${twilio.token}`
         ).toString('base64');
 
         const params = new URLSearchParams();
@@ -81,7 +83,7 @@ export async function POST(
         params.append('Body', existing.message);
 
         const smsRes = await fetch(
-          `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`,
+          `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/Messages.json`,
           {
             method: 'POST',
             headers: {
@@ -130,7 +132,7 @@ export async function POST(
       .single();
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      return internalError(updateError);
     }
 
     return NextResponse.json({ has_reminder: true, reminder: updated });
@@ -174,7 +176,7 @@ export async function POST(
     .single();
 
   if (insertError) {
-    return NextResponse.json({ error: insertError.message }, { status: 500 });
+    return internalError(insertError);
   }
 
   return NextResponse.json({ has_reminder: true, reminder: newReminder }, { status: 201 });
@@ -206,7 +208,7 @@ export async function DELETE(
     .eq('id', existing.id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ has_reminder: false, cancelled: true });

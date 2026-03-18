@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { getFullSettings } from '@/lib/settings-server';
+import { getFullSettings, resolveResendKey } from '@/lib/settings-server';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -13,28 +13,31 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Fetch unmasked settings
+  // Fetch unmasked settings and resolve Resend key
   const settings = await getFullSettings();
-  if (!settings || !settings.resend_api_key) {
+  const apiKey = resolveResendKey(settings);
+  if (!apiKey) {
     return NextResponse.json(
-      { error: 'Email not configured \u2014 add your Resend API key in Settings' },
+      { error: 'Email not configured — no Resend API key found' },
       { status: 400 }
     );
   }
 
-  const fromName = settings.shop_name || 'ShopForge';
-  const fromEmail = 'onboarding@resend.dev';
+  const fromName = settings?.shop_name || 'ShopForge';
+  const fromEmail = 'notifications@send.refit.build';
+  const replyTo = settings?.email || undefined;
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${settings.resend_api_key}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         from: `${fromName} <${fromEmail}>`,
         to: Array.isArray(to) ? to : [to],
+        reply_to: replyTo,
         subject,
         html,
       }),

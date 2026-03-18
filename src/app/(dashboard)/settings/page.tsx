@@ -93,6 +93,7 @@ function SettingsPage() {
 
   // Integrations
   const [intResendKey, setIntResendKey] = useState('');
+  const [showAdvancedCreds, setShowAdvancedCreds] = useState(false);
   const [intTwilioSid, setIntTwilioSid] = useState('');
   const [intTwilioToken, setIntTwilioToken] = useState('');
   const [intTwilioPhone, setIntTwilioPhone] = useState('');
@@ -676,123 +677,149 @@ function SettingsPage() {
               </div>
             )}
 
-            {/* Email (Resend) */}
+            {/* SMS & Email Status */}
             <div className="mb-5">
               <div className="flex items-center gap-2 mb-3">
-                <Icon d={icons.send} size={16} stroke="#f97316" />
-                <span className="font-heading font-bold text-sm text-white uppercase tracking-wider">Email (Resend)</span>
-                {intResendKey && intResendKey.length > 0 ? (
-                  <span className="ml-auto text-[10px] font-heading font-bold uppercase tracking-wider text-success bg-success/10 px-2 py-0.5 rounded">Configured</span>
-                ) : (
-                  <span className="ml-auto text-[10px] font-heading font-bold uppercase tracking-wider text-slate-500 bg-bg px-2 py-0.5 rounded">Not configured</span>
-                )}
+                <Icon d={icons.message} size={16} stroke="#3b82f6" />
+                <span className="font-heading font-bold text-sm text-white uppercase tracking-wider">SMS & Email</span>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className={lbl}>API Key</label>
-                  <input
-                    type="password"
-                    value={intResendKey}
-                    onChange={e => { setIntResendKey(e.target.value); setIntDirty(true); }}
-                    onFocus={e => { if (isMasked(e.target.value)) { setIntResendKey(''); setIntDirty(true); } }}
-                    className={`${inp} w-full`}
-                    placeholder={intResendKey && isMasked(intResendKey) ? intResendKey : 're_...'}
-                    autoComplete="off"
-                  />
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-bg rounded-lg p-3 border border-bdr">
+                  <div className="text-[10px] font-heading text-slate-600 uppercase tracking-wider mb-1">SMS</div>
+                  <div className="flex items-center gap-2">
+                    {intTwilioPhone ? (
+                      <>
+                        <div className="w-2 h-2 rounded-full bg-success" />
+                        <span className="text-sm text-success font-medium">Active</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-2 h-2 rounded-full bg-slate-600" />
+                        <span className="text-sm text-slate-500">No phone number</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <Btn small variant="secondary" onClick={() => testIntegration('resend')} disabled={testingResend || !intResendKey || intDirty}>
+                <div className="bg-bg rounded-lg p-3 border border-bdr">
+                  <div className="text-[10px] font-heading text-slate-600 uppercase tracking-wider mb-1">Email</div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-success" />
+                    <span className="text-sm text-success font-medium">Active</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Twilio phone number — always visible */}
+              <div className="mb-3">
+                <label className={lbl}>SMS Phone Number (Twilio)</label>
+                <div className="flex gap-2">
+                  {twilioNumbers.length > 0 ? (
+                    <select
+                      value={intTwilioPhone}
+                      onChange={e => { setIntTwilioPhone(e.target.value); setIntDirty(true); }}
+                      className={`${inp} w-full`}
+                    >
+                      <option value="">Select a number...</option>
+                      {twilioNumbers.map(n => (
+                        <option key={n.number} value={n.number}>
+                          {n.number} {n.label !== n.number ? `(${n.label})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={intTwilioPhone}
+                      readOnly
+                      className={`${inp} w-full opacity-60`}
+                      placeholder={intTwilioPhone || 'No number assigned'}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={fetchTwilioNumbers}
+                    disabled={fetchingNumbers || intDirty}
+                    className="shrink-0 bg-card border border-bdr rounded-lg px-3 py-2 text-xs font-heading font-semibold uppercase tracking-wider text-slate-400 hover:text-white hover:border-accent/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {fetchingNumbers ? 'Loading...' : 'Fetch'}
+                  </button>
+                </div>
+                {numbersError && <p className="text-xs text-red-400 mt-1">{numbersError}</p>}
+              </div>
+
+              <div className="flex gap-2">
+                <Btn small variant="secondary" onClick={() => testIntegration('twilio')} disabled={testingTwilio || !intTwilioPhone || intDirty}>
                   <span className="flex items-center gap-1.5">
                     <Icon d={icons.refresh} size={12} />
-                    {testingResend ? 'Testing...' : 'Test Connection'}
+                    {testingTwilio ? 'Testing...' : 'Test SMS'}
+                  </span>
+                </Btn>
+                <Btn small variant="secondary" onClick={() => testIntegration('resend')} disabled={testingResend || intDirty}>
+                  <span className="flex items-center gap-1.5">
+                    <Icon d={icons.refresh} size={12} />
+                    {testingResend ? 'Testing...' : 'Test Email'}
                   </span>
                 </Btn>
               </div>
             </div>
 
-            <div className="border-t border-bdr my-5" />
+            {/* Advanced: Use your own credentials */}
+            <div className="border border-bdr rounded-lg overflow-hidden mb-5">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedCreds(!showAdvancedCreds)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface/30 transition"
+              >
+                <span className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <Icon d={icons.settings} size={12} />Advanced: Use your own credentials
+                </span>
+                <Icon d={showAdvancedCreds ? icons.x : icons.plus} size={14} className="text-slate-500" />
+              </button>
+              {showAdvancedCreds && (
+                <div className="px-4 pb-4 space-y-4 border-t border-bdr pt-4">
+                  <p className="text-xs text-slate-500">Override the platform Twilio and Resend accounts with your own. Leave blank to use the platform default.</p>
 
-            {/* SMS (Twilio) */}
-            <div className="mb-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Icon d={icons.bell} size={16} stroke="#3b82f6" />
-                <span className="font-heading font-bold text-sm text-white uppercase tracking-wider">SMS (Twilio)</span>
-                {intTwilioSid && intTwilioToken && intTwilioPhone && intTwilioSid.length > 0 ? (
-                  <span className="ml-auto text-[10px] font-heading font-bold uppercase tracking-wider text-success bg-success/10 px-2 py-0.5 rounded">Configured</span>
-                ) : (
-                  <span className="ml-auto text-[10px] font-heading font-bold uppercase tracking-wider text-slate-500 bg-bg px-2 py-0.5 rounded">Not configured</span>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={lbl}>Account SID</label>
-                  <input
-                    type="text"
-                    value={intTwilioSid}
-                    onChange={e => { setIntTwilioSid(e.target.value); setIntDirty(true); }}
-                    onFocus={e => { if (isMasked(e.target.value)) { setIntTwilioSid(''); setIntDirty(true); } }}
-                    className={`${inp} w-full`}
-                    placeholder="AC..."
-                    autoComplete="off"
-                  />
-                </div>
-                <div>
-                  <label className={lbl}>Auth Token</label>
-                  <input
-                    type="password"
-                    value={intTwilioToken}
-                    onChange={e => { setIntTwilioToken(e.target.value); setIntDirty(true); }}
-                    onFocus={e => { if (isMasked(e.target.value)) { setIntTwilioToken(''); setIntDirty(true); } }}
-                    className={`${inp} w-full`}
-                    placeholder="Auth token"
-                    autoComplete="off"
-                  />
-                </div>
-                <div>
-                  <label className={lbl}>Twilio Phone Number</label>
-                  <div className="flex gap-2">
-                    {twilioNumbers.length > 0 ? (
-                      <select
-                        value={intTwilioPhone}
-                        onChange={e => { setIntTwilioPhone(e.target.value); setIntDirty(true); }}
-                        className={`${inp} w-full`}
-                      >
-                        <option value="">Select a number...</option>
-                        {twilioNumbers.map(n => (
-                          <option key={n.number} value={n.number}>
-                            {n.number} {n.label !== n.number ? `(${n.label})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={lbl}>Twilio Account SID</label>
                       <input
                         type="text"
-                        value={intTwilioPhone}
-                        readOnly
-                        className={`${inp} w-full opacity-60`}
-                        placeholder="Fetch numbers →"
+                        value={intTwilioSid}
+                        onChange={e => { setIntTwilioSid(e.target.value); setIntDirty(true); }}
+                        onFocus={e => { if (isMasked(e.target.value)) { setIntTwilioSid(''); setIntDirty(true); } }}
+                        className={`${inp} w-full`}
+                        placeholder="AC..."
+                        autoComplete="off"
                       />
-                    )}
-                    <button
-                      type="button"
-                      onClick={fetchTwilioNumbers}
-                      disabled={fetchingNumbers || !intTwilioSid || !intTwilioToken || intDirty}
-                      className="shrink-0 bg-card border border-bdr rounded-lg px-3 py-2 text-xs font-heading font-semibold uppercase tracking-wider text-slate-400 hover:text-white hover:border-accent/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      title={intDirty ? 'Save credentials first' : !intTwilioSid || !intTwilioToken ? 'Enter SID & Token first' : 'Fetch available numbers'}
-                    >
-                      {fetchingNumbers ? 'Loading...' : 'Fetch'}
-                    </button>
+                    </div>
+                    <div>
+                      <label className={lbl}>Twilio Auth Token</label>
+                      <input
+                        type="password"
+                        value={intTwilioToken}
+                        onChange={e => { setIntTwilioToken(e.target.value); setIntDirty(true); }}
+                        onFocus={e => { if (isMasked(e.target.value)) { setIntTwilioToken(''); setIntDirty(true); } }}
+                        className={`${inp} w-full`}
+                        placeholder="Auth token"
+                        autoComplete="off"
+                      />
+                    </div>
                   </div>
-                  {numbersError && <p className="text-xs text-red-400 mt-1">{numbersError}</p>}
+
+                  <div>
+                    <label className={lbl}>Resend API Key</label>
+                    <input
+                      type="password"
+                      value={intResendKey}
+                      onChange={e => { setIntResendKey(e.target.value); setIntDirty(true); }}
+                      onFocus={e => { if (isMasked(e.target.value)) { setIntResendKey(''); setIntDirty(true); } }}
+                      className={`${inp} w-full`}
+                      placeholder={intResendKey && isMasked(intResendKey) ? intResendKey : 're_...'}
+                      autoComplete="off"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-end">
-                  <Btn small variant="secondary" onClick={() => testIntegration('twilio')} disabled={testingTwilio || !intTwilioSid || !intTwilioToken || !intTwilioPhone || intDirty}>
-                    <span className="flex items-center gap-1.5">
-                      <Icon d={icons.refresh} size={12} />
-                      {testingTwilio ? 'Testing...' : 'Test Connection'}
-                    </span>
-                  </Btn>
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="border-t border-bdr my-5" />

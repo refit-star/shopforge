@@ -25,7 +25,10 @@ export async function GET() {
   const state = nonce + ':' + shop.id;
 
   const admin = createAdminClient();
-  await admin.from('shops').update({ qb_oauth_state: nonce }).eq('id', shop.id);
+  await admin.from('shop_secrets').upsert(
+    { shop_id: shop.id, qb_oauth_state: nonce, updated_at: new Date().toISOString() },
+    { onConflict: 'shop_id' }
+  );
 
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/quickbooks/callback`;
 

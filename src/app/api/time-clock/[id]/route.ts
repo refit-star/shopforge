@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 // PATCH — clock out, clock in edit, or update notes
 export async function PATCH(
@@ -72,7 +73,7 @@ export async function PATCH(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data);

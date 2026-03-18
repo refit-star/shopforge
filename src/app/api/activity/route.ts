@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function GET() {
   const supabase = createServerClient();
@@ -11,7 +12,7 @@ export async function GET() {
     .limit(20);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data);

@@ -51,10 +51,24 @@ export async function POST(req: NextRequest) {
   // Resolve shop by matching "To" number against shops' Twilio phone number
   const normalizedTo = normalizePhone(to);
 
-  const { data: shops } = await supabase
+  // Get shops with their Twilio phone numbers
+  const { data: allShops } = await supabase
     .from('shops')
-    .select('id, twilio_auth_token, twilio_phone_number')
+    .select('id, twilio_phone_number')
     .not('twilio_phone_number', 'is', null);
+
+  // Fetch secrets for all shops with Twilio numbers
+  const shopIds = (allShops || []).map(s => s.id);
+  const { data: allSecrets } = shopIds.length > 0
+    ? await supabase.from('shop_secrets').select('shop_id, twilio_auth_token').in('shop_id', shopIds)
+    : { data: [] };
+
+  const platformToken = process.env.TWILIO_AUTH_TOKEN || '';
+  const secretMap = new Map((allSecrets || []).map(s => [s.shop_id, s.twilio_auth_token]));
+  const shops = (allShops || []).map(s => ({
+    ...s,
+    twilio_auth_token: secretMap.get(s.id) || platformToken || null,
+  }));
 
   if (!shops || shops.length === 0) {
     return new NextResponse('<Response/>', {

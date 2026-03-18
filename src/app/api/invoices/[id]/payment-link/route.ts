@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { stripe } from '@/lib/stripe';
+import { getStripeClient, resolveStripeKey } from '@/lib/stripe';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -22,13 +23,43 @@ export async function POST(
     .single();
 
   if (invError) {
-    const status = invError.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: invError.message }, { status });
+    if (invError.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(invError);
   }
 
   if (invoice.status === 'Paid') {
     return NextResponse.json({ error: 'Invoice is already paid' }, { status: 400 });
   }
+
+  // Get shop info + secrets
+  const { data: shop } = await supabase
+    .from('shops')
+    .select('id, name, twilio_phone_number, text_to_pay_enabled')
+    .single();
+
+  if (!shop) {
+    return NextResponse.json({ error: 'Shop not found' }, { status: 404 });
+  }
+
+  // Fetch secrets via admin client (shop_secrets has no anon/auth access)
+  const { createAdminClient: createAdmin } = await import('@/lib/supabase-server');
+  const admin = createAdmin();
+  const { data: secrets } = await admin
+    .from('shop_secrets')
+    .select('stripe_secret_key, twilio_account_sid, twilio_auth_token')
+    .eq('shop_id', shop.id)
+    .single();
+
+  let stripeKey: string;
+  try {
+    stripeKey = resolveStripeKey(secrets?.stripe_secret_key);
+  } catch {
+    return NextResponse.json({ error: 'Stripe is not configured. Add your Stripe secret key in Settings → Integrations.' }, { status: 400 });
+  }
+
+  const stripe = getStripeClient(stripeKey);
 
   let paymentUrl = invoice.stripe_payment_link;
 
@@ -87,7 +118,7 @@ export async function POST(
       .eq('id', id);
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      return internalError(updateError);
     }
   }
 
@@ -97,16 +128,10 @@ export async function POST(
     try {
       const customer = invoice.customer as { id: string; name: string; phone: string | null } | null;
       if (customer?.phone) {
-        // Fetch shop settings for Twilio credentials and text-to-pay toggle
-        const { data: shop } = await supabase
-          .from('shops')
-          .select('name, twilio_account_sid, twilio_auth_token, twilio_phone_number, text_to_pay_enabled')
-          .single();
-
         if (
           shop?.text_to_pay_enabled &&
-          shop.twilio_account_sid &&
-          shop.twilio_auth_token &&
+          secrets?.twilio_account_sid &&
+          secrets?.twilio_auth_token &&
           shop.twilio_phone_number
         ) {
           const amount = Number(invoice.total).toLocaleString('en-US', {
@@ -116,7 +141,7 @@ export async function POST(
           const message = `Invoice ${invoice.display_id} for ${amount} from ${shop.name} is ready. Pay here: ${paymentUrl}`;
 
           const credentials = Buffer.from(
-            `${shop.twilio_account_sid}:${shop.twilio_auth_token}`
+            `${secrets.twilio_account_sid}:${secrets.twilio_auth_token}`
           ).toString('base64');
 
           const smsParams = new URLSearchParams();
@@ -125,7 +150,7 @@ export async function POST(
           smsParams.append('Body', message);
 
           const smsRes = await fetch(
-            `https://api.twilio.com/2010-04-01/Accounts/${shop.twilio_account_sid}/Messages.json`,
+            `https://api.twilio.com/2010-04-01/Accounts/${secrets.twilio_account_sid}/Messages.json`,
             {
               method: 'POST',
               headers: {

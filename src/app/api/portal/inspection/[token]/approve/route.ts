@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { rateLimit } from '@/lib/rate-limit';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -52,9 +53,20 @@ export async function POST(
   // Get shop settings
   const { data: shop } = await supabase
     .from('shops')
-    .select('default_labor_rate, dvi_estimate_auto_send, phone, name, twilio_account_sid, twilio_auth_token, twilio_phone_number')
+    .select('default_labor_rate, dvi_estimate_auto_send, phone, name, twilio_phone_number')
     .eq('id', wo.shop_id)
     .single();
+
+  // Get Twilio secrets for SMS (per-shop override or platform fallback)
+  const { data: shopSecretsRaw } = await supabase
+    .from('shop_secrets')
+    .select('twilio_account_sid, twilio_auth_token')
+    .eq('shop_id', wo.shop_id)
+    .single();
+  const shopSecrets = {
+    twilio_account_sid: shopSecretsRaw?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || '',
+    twilio_auth_token: shopSecretsRaw?.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || '',
+  };
 
   const laborRate = shop?.default_labor_rate ? Number(shop.default_labor_rate) : 125;
   const autoSend = shop?.dvi_estimate_auto_send !== false; // default true
@@ -72,7 +84,7 @@ export async function POST(
   // Generate estimate display_id
   const { data: estId, error: idError } = await supabase.rpc('next_est_id', { p_shop_id: wo.shop_id });
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   // Build job description from selected items
@@ -96,7 +108,7 @@ export async function POST(
     .single();
 
   if (estError) {
-    return NextResponse.json({ error: estError.message }, { status: 500 });
+    return internalError(estError);
   }
 
   // Create labor lines — one per selected item with 1 hour default
@@ -125,15 +137,15 @@ export async function POST(
     const portalUrl = `${origin}/portal/${estimate.portal_token}`;
 
     // Best-effort: send SMS with estimate link
-    if (customer?.phone && shop?.twilio_account_sid && shop?.twilio_auth_token && shop?.twilio_phone_number) {
+    if (customer?.phone && shopSecrets?.twilio_account_sid && shopSecrets?.twilio_auth_token && shop?.twilio_phone_number) {
       try {
         const shopName = shop.name || 'Your Shop';
         const smsBody = `${shopName}: Your estimate ${estimate.display_id} for recommended services is ready. Review and approve here: ${portalUrl}`;
-        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shop.twilio_account_sid}/Messages.json`;
+        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shopSecrets.twilio_account_sid}/Messages.json`;
         await fetch(twilioUrl, {
           method: 'POST',
           headers: {
-            'Authorization': 'Basic ' + Buffer.from(`${shop.twilio_account_sid}:${shop.twilio_auth_token}`).toString('base64'),
+            'Authorization': 'Basic ' + Buffer.from(`${shopSecrets.twilio_account_sid}:${shopSecrets.twilio_auth_token}`).toString('base64'),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({

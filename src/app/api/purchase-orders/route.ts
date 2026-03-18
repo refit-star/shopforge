@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 function enrichPO(po: Record<string, unknown>) {
   const lines = (po.po_lines as { qty_ordered: number; qty_received: number; unit_cost: number }[]) || [];
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json((data || []).map(enrichPO));
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
   // Generate display_id
   const { data: idResult, error: idError } = await supabase.rpc('next_po_id');
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   const display_id = idResult as string;
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (poError) {
-    return NextResponse.json({ error: poError.message }, { status: 500 });
+    return internalError(poError);
   }
 
   // Insert lines
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
 
     const { error: linesError } = await supabase.from('po_lines').insert(rows);
     if (linesError) {
-      return NextResponse.json({ error: linesError.message }, { status: 500 });
+      return internalError(linesError);
     }
   }
 
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   return NextResponse.json(enrichPO(full), { status: 201 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function PATCH(
   req: NextRequest,
@@ -43,8 +44,10 @@ export async function PATCH(
     .single();
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -63,7 +66,7 @@ export async function DELETE(
     .eq('id', id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ success: true });

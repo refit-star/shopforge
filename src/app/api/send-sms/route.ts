@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { getFullSettings } from '@/lib/settings-server';
+import { getFullSettings, resolveTwilioCreds } from '@/lib/settings-server';
+import { normalizePhone } from '@/lib/phone';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -13,32 +15,56 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Fetch unmasked settings
-  const settings = await getFullSettings();
-  if (
-    !settings ||
-    !settings.twilio_account_sid ||
-    !settings.twilio_auth_token ||
-    !settings.twilio_phone_number
-  ) {
+  // Validate the "to" number belongs to a customer in this shop
+  const supabase = createServerClient();
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo || normalizedTo.length < 7) {
+    return NextResponse.json({ error: 'Invalid phone number' }, { status: 400 });
+  }
+
+  const { data: customers } = await supabase
+    .from('customers')
+    .select('id, phone')
+    .not('phone', 'is', null);
+
+  const matchedCustomer = customers?.find(
+    (c) => c.phone && normalizePhone(c.phone) === normalizedTo
+  );
+
+  if (!matchedCustomer) {
     return NextResponse.json(
-      { error: 'SMS not configured \u2014 add your Twilio credentials in Settings' },
+      { error: 'Phone number does not match any customer in your shop' },
+      { status: 403 }
+    );
+  }
+
+  // Fetch unmasked settings and resolve Twilio credentials
+  const settings = await getFullSettings();
+  if (!settings || !settings.twilio_phone_number) {
+    return NextResponse.json(
+      { error: 'SMS not configured — no Twilio phone number set' },
       { status: 400 }
     );
   }
 
-  const { twilio_account_sid, twilio_auth_token, twilio_phone_number } = settings;
+  const twilio = resolveTwilioCreds(settings);
+  if (!twilio) {
+    return NextResponse.json(
+      { error: 'SMS not configured — Twilio credentials not found' },
+      { status: 400 }
+    );
+  }
 
   try {
-    const credentials = Buffer.from(`${twilio_account_sid}:${twilio_auth_token}`).toString('base64');
+    const credentials = Buffer.from(`${twilio.sid}:${twilio.token}`).toString('base64');
 
     const params = new URLSearchParams();
-    params.append('From', twilio_phone_number);
+    params.append('From', settings.twilio_phone_number);
     params.append('To', to);
     params.append('Body', message);
 
     const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${twilio_account_sid}/Messages.json`,
+      `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/Messages.json`,
       {
         method: 'POST',
         headers: {
@@ -59,9 +85,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Log outbound message to sms_messages
-    const supabase = createServerClient();
     await supabase.from('sms_messages').insert({
-      customer_id: customer_id || null,
+      customer_id: customer_id || matchedCustomer.id || null,
       direction: 'outbound',
       phone_number: to,
       body: message,
@@ -78,9 +103,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, sid: resData.sid });
   } catch (err) {
-    return NextResponse.json(
-      { error: 'Failed to send SMS: ' + (err instanceof Error ? err.message : 'Unknown error') },
-      { status: 500 }
-    );
+    return internalError(err);
   }
 }

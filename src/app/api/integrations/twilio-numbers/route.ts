@@ -1,22 +1,23 @@
 import { NextResponse } from 'next/server';
-import { getFullSettings } from '@/lib/settings-server';
+import { getFullSettings, resolveTwilioCreds } from '@/lib/settings-server';
 
 export async function GET() {
   const settings = await getFullSettings();
-  if (!settings?.twilio_account_sid || !settings?.twilio_auth_token) {
+  const twilio = resolveTwilioCreds(settings);
+  if (!twilio) {
     return NextResponse.json(
-      { error: 'Twilio credentials not configured. Save your Account SID and Auth Token first.' },
+      { error: 'Twilio credentials not configured. Save your Account SID and Auth Token first, or platform credentials are not set.' },
       { status: 400 }
     );
   }
 
   try {
     const credentials = Buffer.from(
-      `${settings.twilio_account_sid}:${settings.twilio_auth_token}`
+      `${twilio.sid}:${twilio.token}`
     ).toString('base64');
 
     const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/IncomingPhoneNumbers.json?PageSize=50`,
+      `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/IncomingPhoneNumbers.json?PageSize=50`,
       {
         headers: { Authorization: `Basic ${credentials}` },
       }

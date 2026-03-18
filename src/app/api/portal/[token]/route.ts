@@ -27,7 +27,8 @@ export async function POST(
   const { data: estimate } = await supabase
     .from('estimates')
     .select(`
-      *,
+      id, display_id, status, valid_until, notes, created_at, shop_id,
+      customer_id, vehicle_id,
       customer:customers(id, name, phone, email),
       vehicle:vehicles(id, year, make, model, vin, plate),
       estimate_labor_lines(id, description, hours, rate, sort_order),
@@ -58,7 +59,14 @@ export async function POST(
       type: 'estimate',
       shop,
       data: {
-        ...estimate,
+        id: estimate.id,
+        display_id: estimate.display_id,
+        status: estimate.status,
+        valid_until: estimate.valid_until,
+        notes: estimate.notes,
+        created_at: estimate.created_at,
+        customer: estimate.customer,
+        vehicle: estimate.vehicle,
         labor_lines: laborLines,
         parts_lines: partsLines,
         labor_total: Math.round(labor_total * 100) / 100,
@@ -73,7 +81,9 @@ export async function POST(
   const { data: invoice } = await supabase
     .from('invoices')
     .select(`
-      *,
+      id, display_id, status, notes, created_at, shop_id,
+      customer_id, vehicle_id, total, tax, labor_total, parts_total,
+      payment_method, paid_at,
       customer:customers(id, name, phone, email),
       vehicle:vehicles(id, year, make, model, vin, plate),
       invoice_labor_lines(id, description, hours, rate, sort_order),
@@ -89,7 +99,19 @@ export async function POST(
       type: 'invoice',
       shop,
       data: {
-        ...invoice,
+        id: invoice.id,
+        display_id: invoice.display_id,
+        status: invoice.status,
+        notes: invoice.notes,
+        created_at: invoice.created_at,
+        total: invoice.total,
+        tax: invoice.tax,
+        labor_total: invoice.labor_total,
+        parts_total: invoice.parts_total,
+        payment_method: invoice.payment_method,
+        paid_at: invoice.paid_at,
+        customer: invoice.customer,
+        vehicle: invoice.vehicle,
         labor_lines: invoice.invoice_labor_lines,
         parts_lines: invoice.invoice_parts_lines,
       },

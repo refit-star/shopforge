@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFullSettings } from '@/lib/settings-server';
+import { getFullSettings, resolveTwilioCreds, resolveResendKey } from '@/lib/settings-server';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (service === 'resend') {
-    if (!settings.resend_api_key) {
+    const resendKey = resolveResendKey(settings);
+    if (!resendKey) {
       return NextResponse.json(
         { error: 'No Resend API key configured' },
         { status: 400 }
@@ -31,10 +32,10 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.resend_api_key}`,
+          Authorization: `Bearer ${resendKey}`,
         },
         body: JSON.stringify({
-          from: `${settings.shop_name || 'ShopForge'} <onboarding@resend.dev>`,
+          from: `${settings.shop_name || 'ShopForge'} <notifications@send.refit.build>`,
           to: [shopEmail],
           subject: 'ShopForge Test Email',
           html: `<div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:24px">
@@ -63,11 +64,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (service === 'twilio') {
-    if (
-      !settings.twilio_account_sid ||
-      !settings.twilio_auth_token ||
-      !settings.twilio_phone_number
-    ) {
+    const twilio = resolveTwilioCreds(settings);
+    if (!twilio || !settings.twilio_phone_number) {
       return NextResponse.json(
         { error: 'Twilio credentials not fully configured' },
         { status: 400 }
@@ -84,7 +82,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const credentials = Buffer.from(
-        `${settings.twilio_account_sid}:${settings.twilio_auth_token}`
+        `${twilio.sid}:${twilio.token}`
       ).toString('base64');
 
       const params = new URLSearchParams();
@@ -93,7 +91,7 @@ export async function POST(req: NextRequest) {
       params.append('Body', `ShopForge test: Your Twilio SMS integration is working correctly.`);
 
       const res = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/Messages.json`,
+        `https://api.twilio.com/2010-04-01/Accounts/${twilio.sid}/Messages.json`,
         {
           method: 'POST',
           headers: {
@@ -121,5 +119,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ error: 'Invalid service. Use "resend" or "twilio".' }, { status: 400 });
+  if (service === 'stripe') {
+    if (!settings.stripe_secret_key) {
+      return NextResponse.json(
+        { error: 'No Stripe secret key configured' },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(settings.stripe_secret_key);
+      const account = await stripe.accounts.retrieve();
+      const name = account.settings?.dashboard?.display_name || account.id;
+      return NextResponse.json({ success: true, message: `Connected to Stripe account: ${name}` });
+    } catch (err) {
+      return NextResponse.json(
+        { error: 'Invalid Stripe key: ' + (err instanceof Error ? err.message : 'Unknown error') },
+        { status: 400 }
+      );
+    }
+  }
+
+  return NextResponse.json({ error: 'Invalid service. Use "resend", "twilio", or "stripe".' }, { status: 400 });
 }

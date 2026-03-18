@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { syncInvoiceToQB, syncPaymentToQB } from '@/lib/quickbooks';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(
   _req: NextRequest,
@@ -22,8 +23,10 @@ export async function GET(
     .single();
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json({
@@ -78,8 +81,10 @@ export async function PATCH(
     .single();
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   // Best-effort QB sync (fire-and-forget)

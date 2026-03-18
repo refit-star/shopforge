@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
@@ -16,13 +17,15 @@ export async function GET(req: NextRequest) {
     .range(from, to);
 
   if (q) {
-    query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`);
+    // Sanitize: escape SQL wildcards and commas to prevent PostgREST .or() injection
+    const sq = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/,/g, '');
+    query = query.or(`name.ilike.%${sq}%,phone.ilike.%${sq}%,email.ilike.%${sq}%`);
   }
 
   const { data: customers, error, count } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   if (!customers || customers.length === 0) {
@@ -96,7 +99,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data, { status: 201 });

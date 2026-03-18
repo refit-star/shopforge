@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { normalizePhone } from '@/lib/phone';
+import { sanitizeImport } from '@/lib/csv';
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -48,35 +49,26 @@ export async function POST(req: NextRequest) {
       match = byEmail[r.email.toLowerCase().trim()] || null;
     }
 
+    const record = {
+      name: sanitizeImport(name),
+      phone: r.phone?.trim() ? sanitizeImport(r.phone.trim()) : null,
+      email: r.email?.trim() ? sanitizeImport(r.email.trim()) : null,
+      address: r.address?.trim() ? sanitizeImport(r.address.trim()) : null,
+      city: r.city?.trim() ? sanitizeImport(r.city.trim()) : null,
+      state: r.state?.trim() ? sanitizeImport(r.state.trim()) : null,
+      zip: r.zip?.trim() ? sanitizeImport(r.zip.trim()) : null,
+    };
+
     if (match) {
       if (mode === 'update') {
-        toUpdate.push({
-          id: match.id,
-          data: {
-            name,
-            phone: r.phone?.trim() || null,
-            email: r.email?.trim() || null,
-            address: r.address?.trim() || null,
-            city: r.city?.trim() || null,
-            state: r.state?.trim() || null,
-            zip: r.zip?.trim() || null,
-          },
-        });
+        toUpdate.push({ id: match.id, data: record });
       } else {
         skipped++;
       }
       continue;
     }
 
-    toInsert.push({
-      name,
-      phone: r.phone?.trim() || null,
-      email: r.email?.trim() || null,
-      address: r.address?.trim() || null,
-      city: r.city?.trim() || null,
-      state: r.state?.trim() || null,
-      zip: r.zip?.trim() || null,
-    });
+    toInsert.push(record);
   }
 
   let imported = 0;

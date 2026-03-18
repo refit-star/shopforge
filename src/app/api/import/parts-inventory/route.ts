@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { sanitizeImport } from '@/lib/csv';
 
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
@@ -37,14 +38,18 @@ export async function POST(req: NextRequest) {
     const pn = r.part_number?.trim();
     const matchId = pn ? byPartNum[pn.toLowerCase()] : null;
 
+    const sanitizedName = sanitizeImport(name);
+    const sanitizedPn = pn ? sanitizeImport(pn) : null;
+    const sanitizedCategory = r.category?.trim() ? sanitizeImport(r.category.trim()) : null;
+
     if (matchId) {
       if (mode === 'update') {
         toUpdate.push({
           id: matchId,
           data: {
-            name,
-            part_number: pn || null,
-            category: r.category?.trim() || null,
+            name: sanitizedName,
+            part_number: sanitizedPn,
+            category: sanitizedCategory,
             qty_on_hand: r.qty_on_hand ? parseInt(r.qty_on_hand, 10) || 0 : 0,
             cost: r.cost ? parseFloat(r.cost) || 0 : 0,
             price: r.price ? parseFloat(r.price) || 0 : 0,
@@ -57,9 +62,9 @@ export async function POST(req: NextRequest) {
     }
 
     toInsert.push({
-      name,
-      part_number: pn || null,
-      category: r.category?.trim() || null,
+      name: sanitizedName,
+      part_number: sanitizedPn,
+      category: sanitizedCategory,
       qty_on_hand: r.qty_on_hand ? parseInt(r.qty_on_hand, 10) || 0 : 0,
       cost: r.cost ? parseFloat(r.cost) || 0 : 0,
       price: r.price ? parseFloat(r.price) || 0 : 0,

@@ -42,9 +42,23 @@ The `set_shop_id()` trigger auto-populates `shop_id` on INSERT — API code shou
   - QuickBooks callback (`/api/quickbooks/callback`) — OAuth redirect
   - Admin provisioning (`/api/admin/...`) — admin key auth
   - Storage bucket uploads (bucket policies require service role)
-  - Reading QB tokens from shops table (tokens are sensitive, RLS-masked)
+  - Reading secrets from `shop_secrets` table (deny-all RLS, service_role only)
 
 Never use `createAdminClient()` for dashboard data operations.
+
+## Shop Secrets
+
+All sensitive credentials live in `shop_secrets` (NOT `shops`). The `shop_secrets` table has RLS enabled with zero policies (deny-all for anon/authenticated — only service_role can access).
+
+- **`getShopSecrets()`** (`src/lib/secrets-server.ts`) — Resolves shop via RLS, reads secrets via admin client. Use in authenticated routes.
+- **`getShopSecretsById(shopId)`** — For webhook/portal routes where shop_id is already validated.
+- **`getFullSettings()`** (`src/lib/settings-server.ts`) — Merges `shops` data + `shop_secrets` for server-side use. Never send raw result to client.
+- Secret columns: `twilio_account_sid`, `twilio_auth_token`, `stripe_secret_key`, `stripe_webhook_secret`, `qb_access_token`, `qb_refresh_token`, `qb_token_expires_at`, `qb_realm_id`, `qb_oauth_state`, `resend_api_key`, `partstech_api_key`, `plate_lookup_api_key`
+- Non-secret columns that stay on `shops`: `twilio_phone_number`, `stripe_publishable_key`, `partstech_username`
+
+## Error Handling
+
+Use `internalError()` from `src/lib/api-error.ts` for all 500 responses. It logs the real error server-side via `console.error` and returns a generic message to the client. Never return `error.message` from Supabase/Stripe/Twilio in responses.
 
 ## Unauthenticated Routes (Middleware Skip List)
 
@@ -53,10 +67,11 @@ These routes skip auth in `src/middleware.ts`:
 - `/api/portal/*` — token-based customer portal (estimates, invoices, DVI reports)
 - `/portal/*` — customer portal pages (estimates, invoices, DVI reports)
 - `/api/book/*` — public booking API (slug-based)
+- `/api/auth/*` — session cookie management (login/logout)
 - `/api/stripe/webhook` — Stripe signature verification
 - `/api/twilio/webhook` — Twilio signature validation
 - `/api/quickbooks/callback` — OAuth redirect from Intuit
-- `/api/admin/*` — admin key auth
+- `/api/admin/*` — admin key auth (timingSafeEqual + 5/hr/IP rate limit)
 - `/login/*` — public login pages
 - `/book/*` — public online booking pages
 
@@ -70,7 +85,7 @@ The following fields are masked in `GET /api/settings` responses:
 
 - `qb_access_token`, `qb_refresh_token`
 - `twilio_auth_token`
-- `stripe_secret_key`
+- `stripe_secret_key`, `stripe_publishable_key`, `stripe_webhook_secret`
 - `resend_api_key`
 - `partstech_api_key`
 - `plate_lookup_api_key`
@@ -123,7 +138,7 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 
 ### Invoicing & Payments
 - Invoice creation from WO (snapshots lines) or standalone
-- Stripe payment links (checkout sessions, webhook on payment)
+- Stripe payment links (checkout sessions, webhook on payment) — per-shop keys with platform env var fallback
 - Text-to-pay via SMS
 - Invoice tax rate from shops table
 - QB sync error banner on invoice detail — shows `qb_sync_error` with "Retry Sync" button
@@ -285,7 +300,7 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 - Route: `POST /api/vehicles/plate-lookup` (plate, state → vin, year, make, model)
 - Migration: `011_plate_lookup.sql`
 
-### CSV Data Import
+### CSV Data Import & Export
 - `/import` page: 4-step wizard (select type → upload & map columns → validate → import results)
 - Three import types: Customers, Vehicles, Parts Inventory
 - Column mapping: auto-detects CSV headers using fuzzy alias matching, manual override via dropdowns
@@ -296,8 +311,14 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
   - Parts: match by part_number. User chooses "skip" or "update existing"
 - Validation: shows valid/invalid row counts, issues table, preview of mapped data
 - Bulk insert via Supabase `.insert([])` — all records get `shop_id` from RLS/trigger
-- Routes: `POST /api/import/customers`, `POST /api/import/vehicles`, `POST /api/import/parts-inventory`
-- Import is accessible via Settings → Import Data tab (not a standalone sidebar item)
+- Import routes: `POST /api/import/customers`, `POST /api/import/vehicles`, `POST /api/import/parts-inventory`
+- Import sanitization: all string fields run through `sanitizeImport()` (`src/lib/csv.ts`) before DB write to strip formula injection chars (`=`, `+`, `-`, `@`, tab)
+- CSV export: 3 GET routes return `text/csv` attachments, RLS-scoped, `.range(0, 49999)` to avoid Supabase 1,000-row default cap
+  - `GET /api/export/customers` — name, phone, email, address, city, state, zip, tags, created_at
+  - `GET /api/export/vehicles` — customer name (join), year, make, model, VIN, plate, mileage
+  - `GET /api/export/parts-inventory` — name, part_number, category, qty_on_hand, cost, price, vendor name (join), active
+- CSV formula sanitization: `csvCell()` in `src/lib/csv.ts` prepends `'` to values starting with `=`, `+`, `-`, `@`, or tab. Used by export routes and reports CSV export (`esc()` in `reports/page.tsx`)
+- Accessible via Settings → Import / Export Data tab (not a standalone sidebar item)
 
 ### Global Search
 - Unified search endpoint: `GET /api/search?q=` — queries customers, vehicles, work orders, invoices, estimates, purchase orders in parallel
@@ -331,14 +352,14 @@ External services (QuickBooks, Stripe, Twilio) are best-effort — never block c
 - Routes: `/api/canned-jobs` (GET/POST), `/api/canned-jobs/[id]` (GET/PATCH/DELETE)
 
 ### Settings Organization
-- 6-tab layout: Profile, Team & Services, Integrations, Notifications, Booking, Import Data
+- 6-tab layout: Profile, Team & Services, Integrations, Notifications, Booking, Import / Export Data
 - Tab navigation via `?tab=xxx` query params (default: 'profile')
 - **Profile**: shop name, address, phone, email, owner info, logo, labor rate, tax rate, hours, WO/invoice prefixes, invoice footer
 - **Team & Services**: technicians (CRUD with color picker), canned jobs with labor/parts line editors, vendors
 - **Integrations**: Twilio, Stripe, Resend, QuickBooks, PartsTech, Plate Lookup
 - **Notifications**: auto-SMS toggles per WO status, estimate approval alert, DVI auto-send estimates toggle, service reminder SMS toggle
 - **Booking**: online booking on/off, lead time, booking window, bookable services
-- **Import Data**: CSV import wizard (dynamically loaded)
+- **Import / Export Data**: CSV import wizard (dynamically loaded) + export data section with 3 download buttons (customers, vehicles, parts inventory)
 
 ### First-Run Setup Wizard
 - `SetupWizard` component (`src/components/SetupWizard.tsx`)
@@ -470,8 +491,7 @@ These issues remain after the 5-wave UX overhaul.
 - No chart interactivity (CSS bars only, can't drill into a month).
 - No forecasting or goal tracking.
 
-### Import
-- No CSV export template for users to download and fill in.
+### Import/Export
 - No undo after import (must manually delete or re-import with update mode).
 - No file size validation (could hang on large CSVs).
 
@@ -550,6 +570,16 @@ Deep code review of all 5 waves identified 20 issues. Items 1-13 fixed, 14-20 re
 
 13. **Pre-existing shops backfilled** — migration `014_post_wave_fixes.sql`
     - Added `setup_completed_at` and `dvi_estimate_auto_send` columns to `shops`. Backfilled `setup_completed_at` for shops with existing techs + canned jobs.
+
+### Per-Shop Stripe Credentials
+- `stripe_secret_key`, `stripe_publishable_key`, `stripe_webhook_secret` columns on `shops` table (nullable)
+- Per-shop keys take priority; falls back to platform env vars (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`) with console warning
+- `src/lib/stripe.ts`: `getStripeClient(key)` factory with instance cache, `resolveStripeKey(shopKey)` helper
+- Payment link route (`/api/invoices/[id]/payment-link`): fetches shop's `stripe_secret_key`, creates per-shop Stripe client
+- Webhook route (`/api/stripe/webhook`): pre-parses payload to extract `invoice_id` → looks up shop → uses per-shop `stripe_webhook_secret` for signature verification
+- Settings UI: 3 fields (secret key, publishable key, webhook secret) + Test Connection button (calls `stripe.accounts.retrieve()`)
+- Test endpoint: `POST /api/integrations/test` with `service: 'stripe'`
+- Migration: `015_stripe_per_shop.sql`
 
 ### Low (nice to have)
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { INSPECTION_CATEGORIES } from '@/lib/types';
+import { internalError } from '@/lib/api-error';
 
 const INSPECTION_SELECT = '*, inspection_items(*, inspection_item_media(*))';
 
@@ -64,7 +65,7 @@ export async function POST(
     .single();
 
   if (error || !inspection) {
-    return NextResponse.json({ error: error?.message || 'Failed to create inspection' }, { status: 500 });
+    return internalError(error);
   }
 
   // Seed default items
@@ -85,7 +86,7 @@ export async function POST(
 
   const { error: itemsError } = await supabase.from('inspection_items').insert(items);
   if (itemsError) {
-    return NextResponse.json({ error: itemsError.message }, { status: 500 });
+    return internalError(itemsError);
   }
 
   // Re-fetch with items + media
@@ -120,7 +121,7 @@ export async function PATCH(
           .eq('id', item.id);
 
         if (error) {
-          return NextResponse.json({ error: error.message }, { status: 500 });
+          return internalError(error);
         }
       }
     }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function GET(
   _req: NextRequest,
@@ -15,7 +16,7 @@ export async function GET(
     .order('created_at');
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -34,6 +35,17 @@ export async function POST(
 
   if (!file) {
     return NextResponse.json({ error: 'file is required' }, { status: 400 });
+  }
+
+  // Validate file type
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime'];
+  if (!allowedTypes.includes(file.type)) {
+    return NextResponse.json({ error: 'Invalid file type. Use PNG, JPG, WebP, GIF, MP4, or MOV.' }, { status: 400 });
+  }
+
+  // Max 10MB
+  if (file.size > 10 * 1024 * 1024) {
+    return NextResponse.json({ error: 'File too large. Max 10MB.' }, { status: 400 });
   }
 
   // Resolve shop_id from the work order
@@ -58,7 +70,7 @@ export async function POST(
     .upload(filePath, fileBuffer, { contentType });
 
   if (uploadError) {
-    return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    return internalError(uploadError);
   }
 
   const { data: urlData } = admin.storage
@@ -78,7 +90,7 @@ export async function POST(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json(data, { status: 201 });
@@ -120,7 +132,7 @@ export async function DELETE(
   }
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ ok: true });

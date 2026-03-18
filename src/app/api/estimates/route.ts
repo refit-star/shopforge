@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 const SELECT_WITH_JOINS = `
   *,
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     .range(from, to);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   const enriched = (data || []).map(computeTotals);
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
   // Generate display_id
   const { data: idResult, error: idError } = await supabase.rpc('next_est_id');
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   const display_id = idResult as string;
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (estError) {
-    return NextResponse.json({ error: estError.message }, { status: 500 });
+    return internalError(estError);
   }
 
   // Insert labor lines
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
       .insert(laborRows);
 
     if (laborError) {
-      return NextResponse.json({ error: laborError.message }, { status: 500 });
+      return internalError(laborError);
     }
   }
 
@@ -120,7 +121,7 @@ export async function POST(req: NextRequest) {
       .insert(partsRows);
 
     if (partsError) {
-      return NextResponse.json({ error: partsError.message }, { status: 500 });
+      return internalError(partsError);
     }
   }
 
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   return NextResponse.json(computeTotals(full), { status: 201 });

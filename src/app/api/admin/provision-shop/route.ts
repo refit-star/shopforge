@@ -1,16 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
+import crypto from 'crypto';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
-  // Auth: require admin key
+  // Rate limit: 5 attempts per hour per IP
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (!rateLimit(`admin-provision:${ip}`, 5, 3600000)) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  }
+
+  // Auth: require admin key with timing-safe comparison
   const adminKey = (process.env.ADMIN_PROVISION_KEY || '').trim();
   const key = (req.headers.get('x-admin-key') || '').trim();
-  if (!adminKey || key !== adminKey) {
+
+  if (!adminKey || !key) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(key), Buffer.from(adminKey))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  } catch {
+    // Buffer length mismatch
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const body = await req.json();
-  const { shop_name, slug, owner_email, owner_name } = body;
+  const { shop_name, slug, owner_email, owner_name, area_code } = body;
 
   // Validate required fields
   if (!shop_name || !slug || !owner_email) {
@@ -56,7 +74,60 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (shopError) {
-    return NextResponse.json({ error: shopError.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create shop' }, { status: 500 });
+  }
+
+  // 2b. Create shop_secrets row for the new shop
+  await supabase.from('shop_secrets').insert({ shop_id: shop.id });
+
+  // 2c. Auto-provision Twilio phone number if area_code provided and platform creds exist
+  let provisionedNumber: string | null = null;
+  if (area_code && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    try {
+      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+      const credentials = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+      const webhookUrl = `${req.nextUrl.origin}/api/twilio/webhook`;
+
+      // Search for available number in the area code
+      const searchRes = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/AvailablePhoneNumbers/US/Local.json?AreaCode=${area_code}&SmsEnabled=true&Limit=1`,
+        { headers: { Authorization: `Basic ${credentials}` } }
+      );
+      const searchData = await searchRes.json();
+      const available = searchData.available_phone_numbers?.[0];
+
+      if (available) {
+        // Buy the number
+        const buyParams = new URLSearchParams();
+        buyParams.append('PhoneNumber', available.phone_number);
+        buyParams.append('SmsUrl', webhookUrl);
+        buyParams.append('SmsMethod', 'POST');
+        buyParams.append('FriendlyName', `ShopForge - ${shop_name}`);
+
+        const buyRes = await fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/IncomingPhoneNumbers.json`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Basic ${credentials}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: buyParams.toString(),
+          }
+        );
+
+        if (buyRes.ok) {
+          const buyData = await buyRes.json();
+          provisionedNumber = buyData.phone_number;
+          // Assign to shop
+          await supabase.from('shops').update({ twilio_phone_number: provisionedNumber }).eq('id', shop.id);
+        }
+      }
+    } catch {
+      // Best-effort — don't fail provisioning if number buy fails
+      console.error('[provision-shop] Twilio number provisioning failed');
+    }
   }
 
   // 3. Invite auth user (or find existing)
@@ -73,7 +144,7 @@ export async function POST(req: NextRequest) {
     if (inviteError.message.includes('already been registered')) {
       const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
       if (listError) {
-        return NextResponse.json({ error: listError.message }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to find user' }, { status: 500 });
       }
       const found = users.find((u) => u.email === owner_email);
       if (!found) {
@@ -83,7 +154,7 @@ export async function POST(req: NextRequest) {
     } else {
       // Clean up: delete the shop we just created
       await supabase.from('shops').delete().eq('id', shop.id);
-      return NextResponse.json({ error: inviteError.message }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to invite user' }, { status: 500 });
     }
   } else {
     userId = inviteData.user.id;
@@ -101,7 +172,7 @@ export async function POST(req: NextRequest) {
   if (mappingError) {
     // Clean up on failure
     await supabase.from('shops').delete().eq('id', shop.id);
-    return NextResponse.json({ error: mappingError.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create shop mapping' }, { status: 500 });
   }
 
   return NextResponse.json({
@@ -109,6 +180,7 @@ export async function POST(req: NextRequest) {
     slug: shop.slug,
     user_id: userId,
     login_url: `${baseUrl}/login/${slug}`,
-    message: `Shop "${shop_name}" provisioned. Invite sent to ${owner_email} — they will set their password via email and land at ${baseUrl}/login/${slug}`,
+    twilio_phone_number: provisionedNumber || null,
+    message: `Shop "${shop_name}" provisioned.${provisionedNumber ? ` Twilio number ${provisionedNumber} assigned.` : ''} Invite sent to ${owner_email}.`,
   }, { status: 201 });
 }

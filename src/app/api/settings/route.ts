@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { getShopSecrets } from '@/lib/secrets-server';
 
 const SENSITIVE_FIELDS = [
   'resend_api_key',
@@ -8,6 +9,20 @@ const SENSITIVE_FIELDS = [
   'twilio_phone_number',
   'stripe_secret_key',
   'stripe_publishable_key',
+  'stripe_webhook_secret',
+  'partstech_api_key',
+  'plate_lookup_api_key',
+  'qb_access_token',
+  'qb_refresh_token',
+];
+
+// Fields that live in shop_secrets instead of shops
+const SECRET_COLUMNS = [
+  'resend_api_key',
+  'twilio_account_sid',
+  'twilio_auth_token',
+  'stripe_secret_key',
+  'stripe_webhook_secret',
   'partstech_api_key',
   'plate_lookup_api_key',
   'qb_access_token',
@@ -29,11 +44,14 @@ export async function GET() {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to load settings' }, { status: 500 });
   }
 
+  // Merge secrets from shop_secrets table (admin client only)
+  const secrets = await getShopSecrets();
+
   // Map shops.name → shop_name for frontend compat
-  const result = { ...data, shop_name: data.name };
+  const result: Record<string, unknown> = { ...data, ...secrets, shop_name: data.name };
 
   // Mask sensitive fields before returning to client
   for (const field of SENSITIVE_FIELDS) {
@@ -49,7 +67,8 @@ export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
 
-  const allowedFields = [
+  // Fields allowed on the shops table
+  const shopFields = [
     'shop_name', 'address', 'phone', 'email',
     'owner_name', 'owner_initials',
     'default_labor_rate', 'tax_rate',
@@ -57,14 +76,9 @@ export async function PATCH(req: NextRequest) {
     'invoice_footer',
     'wo_prefix', 'invoice_prefix',
     'logo_url',
-    'resend_api_key',
-    'twilio_account_sid',
-    'twilio_auth_token',
     'twilio_phone_number',
-    'stripe_secret_key',
     'stripe_publishable_key',
     'partstech_username',
-    'partstech_api_key',
     'sms_auto_templates',
     'text_to_pay_enabled',
     'dvi_auto_send',
@@ -73,34 +87,52 @@ export async function PATCH(req: NextRequest) {
     'online_booking_enabled',
     'booking_lead_hours',
     'booking_window_days',
-    'plate_lookup_api_key',
   ];
 
-  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const shopUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const secretUpdates: Record<string, unknown> = {};
 
-  for (const key of allowedFields) {
-    if (key in body) {
-      // Skip masked values — don't overwrite real keys with mask dots
-      const val = body[key];
-      if (typeof val === 'string' && val.startsWith('\u2022\u2022\u2022\u2022')) continue;
-      // Map shop_name → name for the shops table column
+  for (const key of [...shopFields, ...SECRET_COLUMNS]) {
+    if (!(key in body)) continue;
+    const val = body[key];
+    // Skip masked values — don't overwrite real keys with mask dots
+    if (typeof val === 'string' && val.startsWith('\u2022\u2022\u2022\u2022')) continue;
+
+    if (SECRET_COLUMNS.includes(key)) {
+      secretUpdates[key] = val;
+    } else {
       const dbKey = key === 'shop_name' ? 'name' : key;
-      updates[dbKey] = body[key];
+      shopUpdates[dbKey] = val;
     }
   }
 
+  // Update shops table via RLS-scoped client
   const { data, error } = await supabase
     .from('shops')
-    .update(updates)
+    .update(shopUpdates)
     .select()
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 
-  // Map shops.name → shop_name for frontend compat
-  const result = { ...data, shop_name: data.name };
+  // Update shop_secrets via admin client if any secret fields changed
+  if (Object.keys(secretUpdates).length > 0) {
+    const admin = createAdminClient();
+    secretUpdates.updated_at = new Date().toISOString();
+    const { error: secretError } = await admin
+      .from('shop_secrets')
+      .upsert({ shop_id: data.id, ...secretUpdates }, { onConflict: 'shop_id' });
+
+    if (secretError) {
+      return NextResponse.json({ error: 'Failed to update credentials' }, { status: 500 });
+    }
+  }
+
+  // Fetch updated secrets for response
+  const secrets = await getShopSecrets();
+  const result: Record<string, unknown> = { ...data, ...secrets, shop_name: data.name };
 
   // Mask sensitive fields in the response
   for (const field of SENSITIVE_FIELDS) {

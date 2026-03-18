@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 const SELECT_WITH_JOINS = `
   *,
@@ -47,8 +48,10 @@ export async function GET(
   const { data, error } = await fetchFull(supabase, id);
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -79,7 +82,7 @@ export async function PATCH(
       .eq('id', id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalError(error);
     }
   }
 
@@ -97,7 +100,7 @@ export async function PATCH(
       }));
       const { error } = await supabase.from('estimate_labor_lines').insert(rows);
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return internalError(error);
       }
     }
   }
@@ -116,7 +119,7 @@ export async function PATCH(
       }));
       const { error } = await supabase.from('estimate_parts_lines').insert(rows);
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return internalError(error);
       }
     }
   }
@@ -125,8 +128,10 @@ export async function PATCH(
   const { data, error } = await fetchFull(supabase, id);
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -145,7 +150,7 @@ export async function DELETE(
     .eq('id', id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ ok: true });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -129,7 +130,7 @@ export async function POST(
     .eq('id', estimate.id);
 
   if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
+    return internalError(updateError);
   }
 
   // Best-effort: create notification for shop staff
@@ -158,15 +159,25 @@ export async function POST(
         .replace(/\{\{display_id\}\}/g, estimate.display_id)
         .replace(/\{\{shop_name\}\}/g, '');  // shop doesn't need its own name
 
-      // Use the admin client to get Twilio credentials and send SMS
-      const { data: shopCreds } = await supabase
+      // Fetch Twilio credentials (per-shop override or platform fallback)
+      const { data: shopCredsRaw } = await supabase
+        .from('shop_secrets')
+        .select('twilio_account_sid, twilio_auth_token')
+        .eq('shop_id', estimate.shop_id)
+        .single();
+      const shopCreds = {
+        twilio_account_sid: shopCredsRaw?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || '',
+        twilio_auth_token: shopCredsRaw?.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || '',
+      };
+
+      // Get twilio_phone_number from shops (not a secret)
+      const { data: shopPhone } = await supabase
         .from('shops')
-        .select('twilio_account_sid, twilio_auth_token, twilio_phone_number')
+        .select('twilio_phone_number')
         .eq('id', estimate.shop_id)
         .single();
 
-      if (shopCreds?.twilio_account_sid && shopCreds?.twilio_auth_token && shopCreds?.twilio_phone_number) {
-        // Direct Twilio call since we're in an unauthenticated route
+      if (shopCreds?.twilio_account_sid && shopCreds?.twilio_auth_token && shopPhone?.twilio_phone_number) {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${shopCreds.twilio_account_sid}/Messages.json`;
         await fetch(twilioUrl, {
           method: 'POST',
@@ -176,7 +187,7 @@ export async function POST(
           },
           body: new URLSearchParams({
             To: shop.phone,
-            From: shopCreds.twilio_phone_number,
+            From: shopPhone.twilio_phone_number,
             Body: smsBody,
           }),
         });

@@ -21,21 +21,21 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminClient();
 
   // Verify CSRF nonce matches what was stored during /connect
-  const { data: shop } = await supabase
-    .from('shops')
+  const { data: shopSecrets } = await supabase
+    .from('shop_secrets')
     .select('qb_oauth_state')
-    .eq('id', shopId)
+    .eq('shop_id', shopId)
     .single();
 
-  if (!shop?.qb_oauth_state || !crypto.timingSafeEqual(
-    Buffer.from(shop.qb_oauth_state),
+  if (!shopSecrets?.qb_oauth_state || !crypto.timingSafeEqual(
+    Buffer.from(shopSecrets.qb_oauth_state),
     Buffer.from(nonce)
   )) {
     return NextResponse.redirect(new URL('/settings?qb=error&reason=csrf', req.url));
   }
 
   // Clear the nonce immediately (single-use)
-  await supabase.from('shops').update({ qb_oauth_state: null }).eq('id', shopId);
+  await supabase.from('shop_secrets').update({ qb_oauth_state: null }).eq('shop_id', shopId);
 
   const clientId = process.env.QB_CLIENT_ID;
   const clientSecret = process.env.QB_CLIENT_SECRET;
@@ -72,17 +72,17 @@ export async function GET(req: NextRequest) {
     // Calculate token expiry (Intuit tokens expire in 3600s by default)
     const expiresAt = new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString();
 
-    // Store tokens in the shop record
+    // Store tokens in shop_secrets
     const { error: updateError } = await supabase
-      .from('shops')
-      .update({
+      .from('shop_secrets')
+      .upsert({
+        shop_id: shopId,
         qb_realm_id: realmId,
         qb_access_token: tokens.access_token,
         qb_refresh_token: tokens.refresh_token,
         qb_token_expires_at: expiresAt,
         updated_at: new Date().toISOString(),
-      })
-      .eq('id', shopId);
+      }, { onConflict: 'shop_id' });
 
     if (updateError) {
       return NextResponse.redirect(new URL('/settings?qb=error', req.url));

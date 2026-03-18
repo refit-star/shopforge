@@ -16,7 +16,7 @@ function getQBApiBase() {
 // ---------------------------------------------------------------------------
 
 interface ShopQBFields {
-  id: string;
+  id: string; // shop_id mapped to id for compatibility
   qb_access_token: string;
   qb_refresh_token: string;
   qb_token_expires_at: string; // ISO timestamp
@@ -150,16 +150,16 @@ export async function getAccessToken(
       Date.now() + (body.expires_in ?? 3600) * 1000,
     ).toISOString();
 
-    // Persist the refreshed tokens
+    // Persist the refreshed tokens to shop_secrets
     const supabase = createAdminClient();
     const { error: updateError } = await supabase
-      .from('shops')
+      .from('shop_secrets')
       .update({
         qb_access_token: body.access_token,
         qb_refresh_token: body.refresh_token ?? shop.qb_refresh_token,
         qb_token_expires_at: newExpiresAt,
       })
-      .eq('id', shop.id);
+      .eq('shop_id', shop.id);
 
     if (updateError) {
       // Token was refreshed but we failed to persist — still usable this request
@@ -408,17 +408,18 @@ export async function syncInvoiceToQB(
   const supabase = createAdminClient();
 
   try {
-    // Get shop QB credentials
+    // Get shop QB credentials from shop_secrets
     const { data: shop } = await supabase
-      .from('shops')
-      .select('id, qb_realm_id, qb_access_token, qb_refresh_token, qb_token_expires_at')
-      .eq('id', shopId)
+      .from('shop_secrets')
+      .select('shop_id, qb_realm_id, qb_access_token, qb_refresh_token, qb_token_expires_at')
+      .eq('shop_id', shopId)
       .single();
 
     if (!shop?.qb_realm_id || !shop?.qb_access_token) return;
 
-    // Get a valid access token
-    const { accessToken, error: tokenError } = await getAccessToken(shop as ShopQBFields);
+    // Get a valid access token (map shop_id → id for interface compat)
+    const shopFields = { ...shop, id: shop.shop_id } as ShopQBFields;
+    const { accessToken, error: tokenError } = await getAccessToken(shopFields);
     if (!accessToken) {
       await supabase.from('invoices').update({ qb_sync_error: tokenError }).eq('id', invoiceId);
       return;
@@ -489,14 +490,15 @@ export async function syncPaymentToQB(
 
   try {
     const { data: shop } = await supabase
-      .from('shops')
-      .select('id, qb_realm_id, qb_access_token, qb_refresh_token, qb_token_expires_at')
-      .eq('id', shopId)
+      .from('shop_secrets')
+      .select('shop_id, qb_realm_id, qb_access_token, qb_refresh_token, qb_token_expires_at')
+      .eq('shop_id', shopId)
       .single();
 
     if (!shop?.qb_realm_id || !shop?.qb_access_token) return;
 
-    const { accessToken, error: tokenError } = await getAccessToken(shop as ShopQBFields);
+    const shopFields = { ...shop, id: shop.shop_id } as ShopQBFields;
+    const { accessToken, error: tokenError } = await getAccessToken(shopFields);
     if (!accessToken) {
       await supabase.from('invoices').update({ qb_sync_error: tokenError }).eq('id', invoiceId);
       return;

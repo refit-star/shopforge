@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 export async function POST(
   req: NextRequest,
@@ -42,7 +43,7 @@ export async function POST(
       .eq('purchase_order_id', id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalError(error);
     }
   }
 
@@ -95,7 +96,7 @@ export async function POST(
     .eq('purchase_order_id', id);
 
   if (linesError) {
-    return NextResponse.json({ error: linesError.message }, { status: 500 });
+    return internalError(linesError);
   }
 
   const allReceived = allLines.every(l => l.qty_received >= l.qty_ordered);
@@ -155,7 +156,7 @@ export async function POST(
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   const enrichedLines = (full.po_lines as { qty_ordered: number; qty_received: number; unit_cost: number }[]) || [];
