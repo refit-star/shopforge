@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Icon, icons } from '@/components/ui/Icon';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Modal } from '@/components/ui/Modal';
@@ -11,8 +11,10 @@ import { VinInput } from '@/components/ui/VinInput';
 import { PlateInput } from '@/components/ui/PlateInput';
 import { TH, TD } from '@/components/ui/Table';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { NewWOModal } from '@/components/NewWOModal';
+import { NewEstimateModal } from '@/components/NewEstimateModal';
 import { fmt } from '@/lib/utils';
-import type { Customer, Vehicle, ServiceReminder, CustomerTag } from '@/lib/types';
+import type { Customer, Vehicle, ServiceReminder, CustomerTag, Tech, ShopSettings } from '@/lib/types';
 import { CUSTOMER_TAGS, TAG_COLORS } from '@/lib/types';
 
 interface ServiceHistoryEntry {
@@ -112,6 +114,14 @@ function CustomersContent() {
   const [rDueMileage, setRDueMileage] = useState('');
   const [rVehicleId, setRVehicleId] = useState('');
 
+  // Quick actions
+  const router = useRouter();
+  const [techs, setTechs] = useState<Tech[]>([]);
+  const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
+  const [showQuickWO, setShowQuickWO] = useState(false);
+  const [showQuickEstimate, setShowQuickEstimate] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+
   // Tag filter
   const [tagFilter, setTagFilter] = useState<string>('');
 
@@ -136,6 +146,8 @@ function CustomersContent() {
 
   useEffect(() => {
     fetchCustomers('');
+    fetch('/api/techs').then(r => r.json()).then(setTechs).catch(() => {});
+    fetch('/api/settings').then(r => r.json()).then(setShopSettings).catch(() => {});
     const openParam = searchParams.get('open');
     if (openParam) {
       openCustomer({ id: openParam } as Customer);
@@ -267,6 +279,37 @@ function CustomersContent() {
     setEditState(selectedCustomer.state || '');
     setEditZip(selectedCustomer.zip || '');
     setEditing(true);
+  };
+
+  const handleQuickInspection = async () => {
+    if (!selectedCustomer || selectedCustomer.vehicles.length === 0) return;
+    setInspecting(true);
+    try {
+      const vehicle = selectedCustomer.vehicles[selectedCustomer.vehicles.length - 1];
+      const woRes = await fetch('/api/work-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: selectedCustomer.id,
+          vehicle_id: vehicle.id,
+          job: 'Vehicle Inspection',
+          priority: 'low',
+        }),
+      });
+      if (woRes.ok) {
+        const wo = await woRes.json();
+        // Start the inspection
+        await fetch(`/api/work-orders/${wo.id}/inspection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        setSelectedCustomer(null);
+        router.push(`/work-orders?open=${wo.id}`);
+      }
+    } finally {
+      setInspecting(false);
+    }
   };
 
   const handleToggleTag = async (tag: string) => {
@@ -523,6 +566,26 @@ function CustomersContent() {
           const c = selectedCustomer;
           return (
             <div className="space-y-6">
+              {/* Quick Actions */}
+              <div className="flex flex-wrap gap-2">
+                <Btn small variant="secondary" onClick={() => setShowQuickWO(true)}>
+                  <span className="flex items-center gap-1.5"><Icon d={icons.wrench} size={13} />New WO</span>
+                </Btn>
+                <Btn small variant="secondary" onClick={() => setShowQuickEstimate(true)}>
+                  <span className="flex items-center gap-1.5"><Icon d={icons.clipboard} size={13} />Estimate</span>
+                </Btn>
+                {c.vehicles.length > 0 && (
+                  <Btn small variant="secondary" onClick={handleQuickInspection} disabled={inspecting}>
+                    <span className="flex items-center gap-1.5"><Icon d={icons.camera} size={13} />{inspecting ? 'Starting...' : 'Inspect'}</span>
+                  </Btn>
+                )}
+                {c.phone && (
+                  <Btn small variant="secondary" onClick={() => router.push(`/messages?phone=${encodeURIComponent(c.phone!)}`)}>
+                    <span className="flex items-center gap-1.5"><Icon d={icons.message} size={13} />Message</span>
+                  </Btn>
+                )}
+              </div>
+
               {/* Contact Info */}
               <div className="bg-bg rounded-lg p-4 border border-bdr">
                 {editing ? (
@@ -974,6 +1037,29 @@ function CustomersContent() {
           );
         })()}
       </SlideOver>
+
+      {/* Quick Action Modals */}
+      {selectedCustomer && (
+        <>
+          <NewWOModal
+            open={showQuickWO}
+            onClose={() => setShowQuickWO(false)}
+            techs={techs}
+            onCreated={() => { fetchCustomers(search); refreshDetail(selectedCustomer.id); }}
+            defaultLaborRate={shopSettings?.default_labor_rate ? Number(shopSettings.default_labor_rate) : 125}
+            defaultCustomer={selectedCustomer}
+            defaultVehicles={selectedCustomer.vehicles}
+          />
+          <NewEstimateModal
+            open={showQuickEstimate}
+            onClose={() => setShowQuickEstimate(false)}
+            onCreated={() => { setShowQuickEstimate(false); fetchCustomers(search); refreshDetail(selectedCustomer.id); }}
+            defaultRate={shopSettings?.default_labor_rate ? Number(shopSettings.default_labor_rate) : 125}
+            defaultCustomer={selectedCustomer}
+            defaultVehicles={selectedCustomer.vehicles}
+          />
+        </>
+      )}
     </div>
   );
 }

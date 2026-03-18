@@ -15,9 +15,11 @@ interface NewWOModalProps {
   techs: Tech[];
   onCreated: () => void;
   defaultLaborRate?: number;
+  defaultCustomer?: Customer | null;
+  defaultVehicles?: Vehicle[];
 }
 
-export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate = 125 }: NewWOModalProps) {
+export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate = 125, defaultCustomer, defaultVehicles }: NewWOModalProps) {
   // Customer search
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState<Customer[]>([]);
@@ -25,6 +27,17 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
   const [customerVehicles, setCustomerVehicles] = useState<Vehicle[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Pre-fill from props when modal opens
+  useEffect(() => {
+    if (open && defaultCustomer) {
+      setSelectedCustomer(defaultCustomer);
+      setCustomerSearch(defaultCustomer.name);
+      const vehicles = defaultVehicles || [];
+      setCustomerVehicles(vehicles);
+      if (vehicles.length > 0) setVehicleId(vehicles[vehicles.length - 1].id);
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Canned Jobs
   const [cannedJobs, setCannedJobs] = useState<CannedJob[]>([]);
