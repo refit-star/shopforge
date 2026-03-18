@@ -134,6 +134,7 @@ function WorkOrdersContent() {
       if (filterTech && w.tech_id !== filterTech) return false;
       if (filterPriority && w.priority !== filterPriority) return false;
       if (filterStatus && w.status !== filterStatus) return false;
+      if (!filterStatus && w.status === 'Completed') return false;
       return true;
     });
   }, [workOrders, search, filterTech, filterPriority, filterStatus]);
