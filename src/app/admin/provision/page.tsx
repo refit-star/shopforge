@@ -214,20 +214,8 @@ export default function AdminProvisionPage() {
                 <div className="text-sm text-white font-medium">{shopName}</div>
               </div>
               <div>
-                <span className="text-[10px] font-heading text-slate-600 uppercase tracking-wider">Slug</span>
-                <div className="text-sm text-slate-300 font-mono">{slug}</div>
-              </div>
-              <div>
-                <span className="text-[10px] font-heading text-slate-600 uppercase tracking-wider">Login URL</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <code className="text-xs text-accent bg-bg px-2 py-1 rounded border border-bdr flex-1 truncate">{result.login_url}</code>
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(result.login_url); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                    className="shrink-0 bg-bg border border-bdr rounded-lg px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-wider text-slate-400 hover:text-white transition"
-                  >
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
-                </div>
+                <span className="text-[10px] font-heading text-slate-600 uppercase tracking-wider">Plan</span>
+                <div className="text-sm text-slate-300">{PLANS.find(p => p.id === plan)?.name}</div>
               </div>
               {result.twilio_phone_number && (
                 <div>
@@ -235,12 +223,44 @@ export default function AdminProvisionPage() {
                   <div className="text-sm text-slate-300">{result.twilio_phone_number}</div>
                 </div>
               )}
-              <div>
-                <span className="text-[10px] font-heading text-slate-600 uppercase tracking-wider">Plan</span>
-                <div className="text-sm text-slate-300">{PLANS.find(p => p.id === plan)?.name}</div>
-              </div>
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
-                <span className="text-xs text-blue-400">Invite email sent to <strong>{ownerEmail}</strong></span>
+
+              {/* Onboarding flow */}
+              <div className="bg-surface border border-bdr rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-[10px] font-heading font-bold text-accent">1</span>
+                  </div>
+                  <div>
+                    <div className="text-sm text-white font-medium">Invite email sent to {ownerEmail}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">They should check their inbox (and spam folder)</div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-[10px] font-heading font-bold text-accent">2</span>
+                  </div>
+                  <div>
+                    <div className="text-sm text-white font-medium">They click the link to set their password</div>
+                    <div className="text-xs text-slate-500 mt-0.5">The link in the email takes them through password setup</div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-[10px] font-heading font-bold text-accent">3</span>
+                  </div>
+                  <div>
+                    <div className="text-sm text-white font-medium">After that, they log in at:</div>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <code className="text-xs text-accent bg-bg px-2 py-1.5 rounded border border-bdr flex-1 truncate">{result.login_url}</code>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(result.login_url); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                        className="shrink-0 bg-bg border border-bdr rounded-lg px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-wider text-slate-400 hover:text-white transition"
+                      >
+                        {copied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
