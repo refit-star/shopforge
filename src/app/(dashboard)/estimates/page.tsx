@@ -37,6 +37,7 @@ function EstimatesContent() {
   const [smsSending, setSmsSending] = useState(false);
   const [smsSent, setSmsSent] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   const fetchEstimates = async () => {
     const json = await fetch('/api/estimates').then(r => r.json());
@@ -211,15 +212,20 @@ function EstimatesContent() {
         </Btn>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — clickable filters */}
       <div className="grid grid-cols-4 gap-4">
         {(['Draft', 'Sent', 'Approved', 'Declined'] as const).map(s => {
           const count = estimates.filter(e => e.status === s).length;
+          const active = statusFilter === s;
           return (
-            <div key={s} className="bg-card border border-bdr rounded-xl p-4">
-              <div className="text-xs font-heading font-semibold text-slate-500 uppercase tracking-wider mb-1">{s}</div>
+            <button
+              key={s}
+              onClick={() => setStatusFilter(active ? '' : s)}
+              className={`bg-card border rounded-xl p-4 text-left transition ${active ? 'border-accent' : 'border-bdr hover:border-slate-600'}`}
+            >
+              <div className={`text-xs font-heading font-semibold uppercase tracking-wider mb-1 ${active ? 'text-accent' : 'text-slate-500'}`}>{s}</div>
               <div className="text-2xl font-heading font-bold text-white">{count}</div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -240,7 +246,7 @@ function EstimatesContent() {
             </tr>
           </thead>
           <tbody>
-            {estimates.map(e => (
+            {estimates.filter(e => !statusFilter || e.status === statusFilter).map(e => (
               <tr key={e.id} onClick={() => openEstimate(e)} className="border-b border-bdr/50 hover:bg-surface/30 cursor-pointer transition">
                 <TD><span className="text-accent font-semibold">{e.display_id}</span></TD>
                 <TD>{e.customer?.name || '—'}</TD>
