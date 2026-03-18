@@ -68,8 +68,8 @@ function WorkOrdersContent() {
   // Bulk selection
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [showBulkMenu, setShowBulkMenu] = useState(false);
-  const [unscheduledCollapsed, setUnscheduledCollapsed] = useState(false);
-  const [scheduledCollapsed, setScheduledCollapsed] = useState(false);
+  const [unscheduledCollapsed, setUnscheduledCollapsed] = useState(true);
+  const [scheduledCollapsed, setScheduledCollapsed] = useState(true);
 
   // Drag-and-drop state
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
