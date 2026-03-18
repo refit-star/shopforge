@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 function computeTotals(wo: Record<string, unknown>) {
   const laborLines = (wo.wo_labor_lines as { hours: number; rate: number }[]) || [];
@@ -48,8 +49,10 @@ export async function GET(
   const { data, error } = await fetchFull(supabase, id);
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -83,7 +86,7 @@ export async function PATCH(
       .eq('id', id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return internalError(error);
     }
   }
 
@@ -128,7 +131,7 @@ export async function PATCH(
       }));
       const { error } = await supabase.from('wo_labor_lines').insert(rows);
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return internalError(error);
       }
     }
     activityEntries.push({ work_order_id: id, action: `Labor lines updated (${body.labor_lines.length} items)` });
@@ -153,7 +156,7 @@ export async function PATCH(
       }));
       const { error } = await supabase.from('wo_parts_lines').insert(rows);
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return internalError(error);
       }
     }
     activityEntries.push({ work_order_id: id, action: `Parts lines updated (${body.parts_lines.length} items)` });
@@ -208,17 +211,22 @@ export async function PATCH(
         try {
           const { data: shop } = await supabase
             .from('shops')
-            .select('name, twilio_account_sid, twilio_auth_token, twilio_phone_number, sms_auto_templates')
+            .select('id, name, twilio_phone_number, sms_auto_templates')
             .single();
 
           const templates = shop?.sms_auto_templates as Record<string, { enabled: boolean; template: string }> | null;
           const tpl = templates?.[body.status];
 
+          // Fetch Twilio secrets from shop_secrets via admin client
+          const { createAdminClient: createAdmin } = await import('@/lib/supabase-server');
+          const admin = createAdmin();
+          const { data: secrets } = shop ? await admin.from('shop_secrets').select('twilio_account_sid, twilio_auth_token').eq('shop_id', shop.id).single() : { data: null };
+
           if (
             tpl?.enabled &&
             tpl.template &&
-            shop?.twilio_account_sid &&
-            shop?.twilio_auth_token &&
+            secrets?.twilio_account_sid &&
+            secrets?.twilio_auth_token &&
             shop?.twilio_phone_number
           ) {
             // Fetch customer phone
@@ -243,7 +251,7 @@ export async function PATCH(
 
               // Send via Twilio
               const credentials = Buffer.from(
-                `${shop.twilio_account_sid}:${shop.twilio_auth_token}`
+                `${secrets.twilio_account_sid}:${secrets.twilio_auth_token}`
               ).toString('base64');
 
               const smsParams = new URLSearchParams();
@@ -252,7 +260,7 @@ export async function PATCH(
               smsParams.append('Body', rendered);
 
               const smsRes = await fetch(
-                `https://api.twilio.com/2010-04-01/Accounts/${shop.twilio_account_sid}/Messages.json`,
+                `https://api.twilio.com/2010-04-01/Accounts/${secrets.twilio_account_sid}/Messages.json`,
                 {
                   method: 'POST',
                   headers: {
@@ -328,8 +336,10 @@ export async function PATCH(
   const { data, error } = await fetchFull(supabase, id);
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500;
-    return NextResponse.json({ error: error.message }, { status });
+    if (error.code === 'PGRST116') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return internalError(error);
   }
 
   return NextResponse.json(data);
@@ -342,21 +352,15 @@ export async function DELETE(
   const { id } = await params;
   const supabase = createServerClient();
 
-  // Block deletion if related records exist that would cause FK violations
-  const [{ count: invCount }, { count: teCount }, { count: inspCount }] = await Promise.all([
-    supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('work_order_id', id),
-    supabase.from('time_entries').select('id', { count: 'exact', head: true }).eq('work_order_id', id),
-    supabase.from('inspections').select('id', { count: 'exact', head: true }).eq('work_order_id', id),
-  ]);
+  // Block deletion only if invoices exist (financial records)
+  const { count: invCount } = await supabase
+    .from('invoices')
+    .select('id', { count: 'exact', head: true })
+    .eq('work_order_id', id);
 
-  const blockers: string[] = [];
-  if (invCount && invCount > 0) blockers.push('invoices');
-  if (teCount && teCount > 0) blockers.push('time entries');
-  if (inspCount && inspCount > 0) blockers.push('inspections');
-
-  if (blockers.length > 0) {
+  if (invCount && invCount > 0) {
     return NextResponse.json(
-      { error: `Cannot delete work order with existing ${blockers.join('/')}.` },
+      { error: 'Cannot delete work order with existing invoices. Delete the invoice first.' },
       { status: 409 }
     );
   }
@@ -383,6 +387,20 @@ export async function DELETE(
   }
 
   // Delete related rows first
+  // Clean up inspections and their media
+  const { data: inspections } = await supabase.from('inspections').select('id').eq('work_order_id', id);
+  if (inspections && inspections.length > 0) {
+    const inspIds = inspections.map(i => i.id);
+    // Get inspection items to clean up media
+    const { data: items } = await supabase.from('inspection_items').select('id').in('inspection_id', inspIds);
+    if (items && items.length > 0) {
+      await supabase.from('inspection_item_media').delete().in('inspection_item_id', items.map(i => i.id));
+    }
+    await supabase.from('inspection_items').delete().in('inspection_id', inspIds);
+    await supabase.from('inspections').delete().eq('work_order_id', id);
+  }
+  // Clean up time entries
+  await supabase.from('time_entries').delete().eq('work_order_id', id);
   await supabase.from('wo_activity_log').delete().eq('work_order_id', id);
   await supabase.from('wo_labor_lines').delete().eq('work_order_id', id);
   await supabase.from('wo_parts_lines').delete().eq('work_order_id', id);
@@ -395,7 +413,7 @@ export async function DELETE(
     .eq('id', id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   return NextResponse.json({ success: true });

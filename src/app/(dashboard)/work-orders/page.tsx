@@ -233,6 +233,9 @@ function WorkOrdersContent() {
     if (res.ok) {
       setSelectedWO(null);
       await fetchWorkOrders();
+    } else {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || 'Failed to delete work order');
     }
   };
 
