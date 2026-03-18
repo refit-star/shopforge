@@ -24,6 +24,7 @@ const DURATION_OPTIONS = [
 ];
 
 export default function SchedulingPage() {
+  const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState(0);
   const [showNewAppt, setShowNewAppt] = useState(false);
   const [techs, setTechs] = useState<Tech[]>([]);
@@ -65,7 +66,11 @@ export default function SchedulingPage() {
   const hoursEnd = shopSettings?.hours_end ?? 18;
   const hours = Array.from({ length: hoursEnd - hoursStart }, (_, i) => hoursStart + i);
 
-  const weekDates = useMemo(() => getWeekDates(new Date()), []);
+  const weekDates = useMemo(() => {
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+    return getWeekDates(base);
+  }, [weekOffset]);
 
   // Time slot options (half-hour increments)
   const timeSlots = useMemo(() => {
@@ -330,8 +335,43 @@ export default function SchedulingPage() {
 
   return (
     <div className="space-y-5">
-      {/* Day tabs + New Appointment */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Week nav + Day tabs + New Appointment */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setWeekOffset(o => o - 1); setSelectedDay(0); }}
+              className="p-2 rounded-lg bg-card border border-bdr text-slate-400 hover:text-white transition"
+              title="Previous week"
+            >
+              <Icon d={icons.chevLeft} size={16} />
+            </button>
+            {weekOffset !== 0 && (
+              <button
+                onClick={() => { setWeekOffset(0); setSelectedDay(0); }}
+                className="px-3 py-1.5 rounded-lg bg-card border border-bdr text-xs font-heading font-semibold text-slate-400 hover:text-white uppercase tracking-wider transition"
+              >
+                Today
+              </button>
+            )}
+            <button
+              onClick={() => { setWeekOffset(o => o + 1); setSelectedDay(0); }}
+              className="p-2 rounded-lg bg-card border border-bdr text-slate-400 hover:text-white transition"
+              title="Next week"
+            >
+              <Icon d={icons.chevRight} size={16} />
+            </button>
+            <span className="text-sm text-slate-500 font-body ml-2">
+              {formatShortDate(weekDates[0])} – {formatShortDate(weekDates[4])}
+            </span>
+          </div>
+          <Btn onClick={() => setShowNewAppt(true)}>
+            <span className="flex items-center gap-2">
+              <Icon d={icons.plus} size={16} />
+              New Appointment
+            </span>
+          </Btn>
+        </div>
         <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0">
           {weekDates.map((d, i) => (
             <button
@@ -348,12 +388,6 @@ export default function SchedulingPage() {
             </button>
           ))}
         </div>
-        <Btn onClick={() => setShowNewAppt(true)}>
-          <span className="flex items-center gap-2">
-            <Icon d={icons.plus} size={16} />
-            New Appointment
-          </span>
-        </Btn>
       </div>
 
       {/* Unassigned Appointments Banner */}
