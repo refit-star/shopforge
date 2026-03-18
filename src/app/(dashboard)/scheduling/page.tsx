@@ -6,7 +6,7 @@ import { Btn } from '@/components/ui/Btn';
 import { Icon, icons } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Modal';
 import { getWeekDates, formatShortDate, formatDayName } from '@/lib/utils';
-import type { Tech, Appointment, Customer, ShopSettings, Notification } from '@/lib/types';
+import type { Tech, Appointment, Customer, ShopSettings, Notification, WorkOrder } from '@/lib/types';
 
 const SERVICE_TYPES = [
   'Oil Change', 'Brake Service', 'Diagnostic', 'Tire Service',
@@ -29,6 +29,7 @@ export default function SchedulingPage() {
   const [showNewAppt, setShowNewAppt] = useState(false);
   const [techs, setTechs] = useState<Tech[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [scheduledWOs, setScheduledWOs] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
 
@@ -93,7 +94,7 @@ export default function SchedulingPage() {
     fetch('/api/settings').then(r => r.json()).then(setShopSettings);
   }, []);
 
-  // Fetch appointments for the week
+  // Fetch appointments + scheduled WOs for the week
   useEffect(() => {
     if (weekDates.length === 0) return;
     const toLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -101,9 +102,11 @@ export default function SchedulingPage() {
     const endDate = new Date(weekDates[4]);
     endDate.setDate(endDate.getDate() + 1);
     const end = toLocal(endDate);
-    fetch(`/api/appointments?start=${start}&end=${end}`)
-      .then(r => r.json())
-      .then(data => { setAppointments(data); setLoading(false); })
+    Promise.all([
+      fetch(`/api/appointments?start=${start}&end=${end}`).then(r => r.json()),
+      fetch(`/api/work-orders?status=Scheduled&scheduled_from=${start}&scheduled_to=${end}`).then(r => r.json()).then(d => Array.isArray(d) ? d : d.data ?? []),
+    ])
+      .then(([appts, wos]) => { setAppointments(appts); setScheduledWOs(wos); setLoading(false); })
       .catch(() => setLoading(false));
   }, [weekDates]);
 
@@ -128,6 +131,14 @@ export default function SchedulingPage() {
       return aDate === dayStr;
     });
   }, [appointments, selectedDay, weekDates]);
+
+  // Filter scheduled WOs for selected day
+  const dayScheduledWOs = useMemo(() => {
+    if (!weekDates[selectedDay]) return [];
+    const wd = weekDates[selectedDay];
+    const dayStr = `${wd.getFullYear()}-${String(wd.getMonth()+1).padStart(2,'0')}-${String(wd.getDate()).padStart(2,'0')}`;
+    return scheduledWOs.filter(w => w.scheduled_date === dayStr);
+  }, [scheduledWOs, selectedDay, weekDates]);
 
   // Customer search
   useEffect(() => {
@@ -454,6 +465,50 @@ export default function SchedulingPage() {
             </div>
           ))}
         </div>
+
+        {/* Scheduled Work Orders row */}
+        {dayScheduledWOs.length > 0 && (
+          <div
+            className="grid border-b border-bdr"
+            style={{ gridTemplateColumns: `64px repeat(${activeTechs.length}, minmax(150px, 1fr))` }}
+          >
+            <div className="bg-surface/50 flex items-center justify-end pr-3 py-2">
+              <span className="text-[10px] text-slate-500 font-heading uppercase tracking-wider">WOs</span>
+            </div>
+            {activeTechs.map(t => {
+              const techWOs = dayScheduledWOs.filter(w => w.tech_id === t.id);
+              return (
+                <div key={t.id} className="border-l border-bdr p-1.5 flex flex-col gap-1">
+                  {techWOs.map(w => {
+                    const vehicle = w.vehicle ? `${w.vehicle.year || ''} ${w.vehicle.make} ${w.vehicle.model}`.trim() : '';
+                    return (
+                      <button
+                        key={w.id}
+                        onClick={() => router.push(`/work-orders?open=${w.id}`)}
+                        className="text-left rounded-md px-2 py-1.5 border transition hover:opacity-80"
+                        style={{
+                          background: (t.color || '#8b5cf6') + '18',
+                          borderColor: (t.color || '#8b5cf6') + '40',
+                        }}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-purple-400">{w.display_id}</span>
+                          <Icon d={icons.wrench} size={9} className="text-purple-400" />
+                        </div>
+                        <div className="text-[11px] text-slate-200 font-medium truncate">{w.customer?.name}</div>
+                        {vehicle && <div className="text-[10px] text-slate-500 truncate">{vehicle}</div>}
+                        <div className="text-[10px] text-slate-500 truncate">{w.job}</div>
+                      </button>
+                    );
+                  })}
+                  {techWOs.length === 0 && (
+                    <div className="h-1" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Time grid */}
         <div

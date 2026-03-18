@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { internalError } from '@/lib/api-error';
 
 function computeTotals(wo: Record<string, unknown>) {
   const laborLines = (wo.wo_labor_lines as { hours: number; rate: number }[]) || [];
@@ -45,10 +46,19 @@ export async function GET(req: NextRequest) {
     query = query.eq('status', status);
   }
 
+  const scheduledFrom = req.nextUrl.searchParams.get('scheduled_from');
+  const scheduledTo = req.nextUrl.searchParams.get('scheduled_to');
+  if (scheduledFrom) {
+    query = query.gte('scheduled_date', scheduledFrom);
+  }
+  if (scheduledTo) {
+    query = query.lte('scheduled_date', scheduledTo);
+  }
+
   const { data, error, count } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return internalError(error);
   }
 
   const enriched = (data || []).map(computeTotals);
@@ -71,7 +81,7 @@ export async function POST(req: NextRequest) {
   // Generate display_id
   const { data: idResult, error: idError } = await supabase.rpc('next_wo_id');
   if (idError) {
-    return NextResponse.json({ error: idError.message }, { status: 500 });
+    return internalError(idError);
   }
 
   const display_id = idResult as string;
@@ -92,7 +102,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (woError) {
-    return NextResponse.json({ error: woError.message }, { status: 500 });
+    return internalError(woError);
   }
 
   // Insert labor lines
@@ -110,7 +120,7 @@ export async function POST(req: NextRequest) {
       .insert(laborRows);
 
     if (laborError) {
-      return NextResponse.json({ error: laborError.message }, { status: 500 });
+      return internalError(laborError);
     }
   }
 
@@ -129,7 +139,7 @@ export async function POST(req: NextRequest) {
       .insert(partsRows);
 
     if (partsError) {
-      return NextResponse.json({ error: partsError.message }, { status: 500 });
+      return internalError(partsError);
     }
   }
 
@@ -148,7 +158,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (fullError) {
-    return NextResponse.json({ error: fullError.message }, { status: 500 });
+    return internalError(fullError);
   }
 
   return NextResponse.json(computeTotals(full), { status: 201 });
