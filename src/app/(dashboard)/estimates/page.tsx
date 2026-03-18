@@ -439,6 +439,8 @@ function EstimatesContent() {
                     <Btn small variant="secondary" onClick={sendEstimateSms} disabled={smsSending}>
                       <span className="flex items-center gap-1.5"><Icon d={icons.message} size={13} />{smsSending ? 'Texting...' : 'Text to Customer'}</span>
                     </Btn>
+                    <Btn small variant="success" onClick={() => updateStatus(selected.id, 'Approved')}>Approve</Btn>
+                    <Btn small variant="danger" onClick={() => updateStatus(selected.id, 'Declined')}>Decline</Btn>
                   </>
                 )}
                 {selected.status === 'Sent' && (
