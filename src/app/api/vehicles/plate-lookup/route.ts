@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   // Call PlateToVIN API
   try {
-    const apiRes = await fetch('https://platetovin.net/api/convert', {
+    const apiRes = await fetch('https://platetovin.com/api/convert', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -90,10 +90,32 @@ export async function POST(req: NextRequest) {
 
     const data = await apiRes.json();
 
-    const vin = data.vin?.trim() || null;
-    const year = data.year ? parseInt(String(data.year), 10) : null;
-    const make = data.make?.trim() || null;
-    const model = data.model?.trim() || null;
+    let vin = data.vin?.trim() || null;
+    let year = data.year ? parseInt(String(data.year), 10) : null;
+    let make = data.make?.trim() || null;
+    let model = data.model?.trim() || null;
+
+    // If PlateToVIN returned a VIN but no year/make/model, decode via NHTSA
+    if (vin && (!make || !model)) {
+      try {
+        const nhtsaRes = await fetch(
+          `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
+        );
+        if (nhtsaRes.ok) {
+          const nhtsaJson = await nhtsaRes.json();
+          const nhtsa: { VariableId: number; Value: string | null }[] = nhtsaJson.Results || [];
+          const getVal = (id: number) => nhtsa.find(r => r.VariableId === id)?.Value?.trim() || null;
+          make = make || getVal(26);
+          model = model || getVal(28);
+          if (!year) {
+            const yrStr = getVal(29);
+            year = yrStr ? parseInt(yrStr, 10) : null;
+          }
+        }
+      } catch {
+        // NHTSA fallback failed — continue with partial data
+      }
+    }
 
     // Cache result
     await supabase.from('plate_lookups').insert({

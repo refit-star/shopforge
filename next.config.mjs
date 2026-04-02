@@ -33,7 +33,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co",
               "font-src 'self'",
-              "connect-src 'self' https://*.supabase.co https://api.twilio.com https://api.resend.com https://oauth.platform.intuit.com https://checkout.stripe.com https://platetovin.net https://vpic.nhtsa.dot.gov",
+              "connect-src 'self' https://*.supabase.co https://api.twilio.com https://api.resend.com https://oauth.platform.intuit.com https://checkout.stripe.com https://platetovin.com https://vpic.nhtsa.dot.gov",
               "frame-src 'self' https://checkout.stripe.com",
               "base-uri 'self'",
               "form-action 'self'",
