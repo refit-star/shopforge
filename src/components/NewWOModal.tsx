@@ -13,7 +13,7 @@ interface NewWOModalProps {
   open: boolean;
   onClose: () => void;
   techs: Tech[];
-  onCreated: () => void;
+  onCreated: (id: string) => void;
   defaultLaborRate?: number;
   defaultCustomer?: Customer | null;
   defaultVehicles?: Vehicle[];
@@ -76,6 +76,8 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
   const [ncvPlateState, setNcvPlateState] = useState('');
   const [ncvMileage, setNcvMileage] = useState('');
   const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const handleCustomerSearch = (q: string) => {
     setCustomerSearch(q);
@@ -190,6 +192,8 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
   };
 
   const resetForm = () => {
+    setCreateError(null);
+    setCreating(false);
     setCustomerSearch('');
     setSelectedCustomer(null);
     setCustomerResults([]);
@@ -213,23 +217,34 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
 
   const handleCreate = async () => {
     if (!selectedCustomer || !vehicleId || !job.trim()) return;
-    await fetch('/api/work-orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customer_id: selectedCustomer.id,
-        vehicle_id: vehicleId,
-        priority,
-        job,
-        tech_id: techId || null,
-        notes: notes || null,
-        labor: laborLines,
-        parts: partsLines,
-      }),
-    });
-    resetForm();
-    onClose();
-    onCreated();
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/work-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: selectedCustomer.id,
+          vehicle_id: vehicleId,
+          priority,
+          job,
+          tech_id: techId || null,
+          notes: notes || null,
+          labor: laborLines,
+          parts: partsLines,
+        }),
+      });
+      if (!res.ok) {
+        setCreateError('Failed to create work order. Please try again.');
+        return;
+      }
+      const wo = await res.json();
+      resetForm();
+      onClose();
+      onCreated(wo.id);
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleClose = () => {
@@ -609,10 +624,13 @@ export function NewWOModal({ open, onClose, techs, onCreated, defaultLaborRate =
         )}
 
         {/* Actions */}
+        {createError && (
+          <p className="text-red-400 text-sm">{createError}</p>
+        )}
         <div className="flex justify-end gap-3 pt-2">
           <Btn variant="secondary" onClick={handleClose}>Cancel</Btn>
-          <Btn onClick={handleCreate} disabled={!selectedCustomer || !vehicleId || !job.trim()}>
-            Create Work Order
+          <Btn onClick={handleCreate} disabled={creating || !selectedCustomer || !vehicleId || !job.trim()}>
+            {creating ? 'Creating...' : 'Create Work Order'}
           </Btn>
         </div>
       </div>

@@ -531,7 +531,7 @@ function WorkOrdersContent() {
         open={showNewWO}
         onClose={() => setShowNewWO(false)}
         techs={techs}
-        onCreated={() => fetchWorkOrders()}
+        onCreated={(id) => refreshAndSelect(id)}
         defaultLaborRate={shopSettings?.default_labor_rate ? Number(shopSettings.default_labor_rate) : 125}
       />
 
